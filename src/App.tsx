@@ -35,16 +35,78 @@ export default function App() {
 
   const isConfigured = isSupabaseConfigured();
 
-  // Try auto-login on mount
+  // Try auto-login and establish Auth state listening on mount
   useEffect(() => {
-    const storedUser = localStorage.getItem('rdspm_session');
-    if (storedUser) {
-      try {
-        const parsed = JSON.parse(storedUser);
-        setUser(parsed);
-        loadReports(parsed);
-      } catch {
-        localStorage.removeItem('rdspm_session');
+    let rawLocalSession: string | null = null;
+    try {
+      rawLocalSession = localStorage.getItem('rdspm_session');
+    } catch (e) {
+      console.warn('Erro ao ler localStorage', e);
+    }
+
+    if (isConfigured && supabase) {
+      // 1. Check if we already have an active Supabase session
+      supabase.auth.getSession().then(({ data: { session } }) => {
+        if (session && session.user) {
+          const metadata = session.user.user_metadata;
+          const currentLoggedUser: UserSession = {
+            id: session.user.id,
+            email: session.user.email || '',
+            name: metadata?.full_name || `${metadata?.role || 'Militar'} PM Sem Nome`,
+            role: metadata?.role || 'Policial',
+            isDemo: false
+          };
+          setUser(currentLoggedUser);
+          localStorage.setItem('rdspm_session', JSON.stringify(currentLoggedUser));
+          loadReports(currentLoggedUser);
+        } else if (rawLocalSession) {
+          // Fallback to local demo session if stored as demo
+          try {
+            const parsed = JSON.parse(rawLocalSession);
+            if (parsed?.isDemo) {
+              setUser(parsed);
+              loadReports(parsed);
+            }
+          } catch {
+            localStorage.removeItem('rdspm_session');
+          }
+        }
+      });
+
+      // 2. Listen to real-time auth state events
+      const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+        if (session && session.user) {
+          const metadata = session.user.user_metadata;
+          const currentLoggedUser: UserSession = {
+            id: session.user.id,
+            email: session.user.email || '',
+            name: metadata?.full_name || `${metadata?.role || 'Militar'} PM Sem Nome`,
+            role: metadata?.role || 'Policial',
+            isDemo: false
+          };
+          setUser(currentLoggedUser);
+          localStorage.setItem('rdspm_session', JSON.stringify(currentLoggedUser));
+          loadReports(currentLoggedUser);
+        } else if (event === 'SIGNED_OUT') {
+          setUser(null);
+          setReports([]);
+          localStorage.removeItem('rdspm_session');
+        }
+      });
+
+      return () => {
+        subscription.unsubscribe();
+      };
+    } else {
+      // Offline fallback only
+      if (rawLocalSession) {
+        try {
+          const parsed = JSON.parse(rawLocalSession);
+          setUser(parsed);
+          loadReports(parsed);
+        } catch {
+          localStorage.removeItem('rdspm_session');
+        }
       }
     }
   }, []);
