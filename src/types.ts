@@ -3,23 +3,65 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+export interface Viatura {
+  id?: string;
+  prefixo: string; // Ex: VTR-1049
+  modelo: string;  // Ex: Toyota Hilux
+  placa?: string;
+  km_inicial?: number;
+  km_final?: number;
+}
+
+export interface OcorrenciaItem {
+  id?: string;
+  natureza_ocorrencia: string; // Ex: Roubo de veículo, Tráfico de drogas
+  ocorrencia_bo?: string;      // Nº do Boletim de Ocorrência
+  suspeitos_conduzidos?: number;
+  observacoes: string;         // Descrição detalhada do fato relatado
+  local_fato?: string;         // Bairro ou endereço do fato
+}
+
+export interface AnexoItem {
+  id?: string;
+  nome_arquivo: string;
+  url_arquivo: string; // Base64 data ou link fictício
+  tipo: 'imagem' | 'pdf' | 'outro';
+}
+
 export interface PoliceReport {
   id: string;
   created_at: string;
   user_id?: string;
   user_email?: string;
-  operacao: string;         // Nome da Operação (Ex: Saturação, Comando de Trânsito, etc.)
-  turno: string;            // Turno de serviço (Matutino, Vespertino, Noturno, etc.)
-  efetivo: number;          // Quantidade de policiais em serviço
-  viaturas: number;         // Número de viaturas empenhadas
-  armas_apreendidas: number; // Quantidade de armas de fogo apreendidas
-  armas_detalhes?: string;  // Tipos e calibres das armas
-  municoes: number;         // Quantidade de munições confiscadas
-  municoes_detalhes?: string;// Calibres das munições
-  drogas_peso: number;      // Quantidade de drogas em gramas (peso aproximado)
-  drogas_detalhes?: string; // Descrição das drogas (Maconha, Cocaína, Crack, etc.)
-  valores: number;          // Dinheiro ou valores apreendidos/recuperados (R$)
-  ocorrencias: string;      // Histórico / Resumo detalhado das ocorrências atendidas
+  
+  // Identificação do Serviço
+  operacao: string;                  // Nome da Operação (Ex: Saturação)
+  turno: string;                     // Turno de escala (Noturno, Vespertino, etc)
+  horario_servico: string;           // Horário de Serviço (Ex: 07:00 às 19:00)
+  cidade: string;                    // Cidade do policiamento (Ex: Cuiabá)
+  comandante_responsavel: string;    // Nome do Oficial/Sargento Comandante
+
+  // Efetivo e Viaturas Gerais
+  efetivo: number;
+  viaturas: number;
+
+  // Produtividade Integrada
+  armas_apreendidas: number;
+  armas_detalhes?: string;
+  municoes: number;
+  municoes_detalhes?: string;
+  drogas_peso: number;               // Peso em gramas
+  drogas_detalhes?: string;
+  valores: number;                   // Dinheiro em espécie (R$)
+  observacoes?: string;              // Observações gerais da seção
+
+  // Relato de Ocorrências Principal (Backward compatibility)
+  ocorrencias: string;               
+
+  // Relacionados (Enriquecimento da estrutura no Supabase)
+  lista_viaturas?: Viatura[];
+  lista_ocorrencias?: OcorrenciaItem[];
+  lista_anexos?: AnexoItem[];
 }
 
 export interface UserSession {
@@ -27,5 +69,8 @@ export interface UserSession {
   email: string;
   name?: string;
   role?: string;
+  matricula?: string;
+  pelotao?: string;
+  cidade?: string;
   isDemo: boolean;
 }

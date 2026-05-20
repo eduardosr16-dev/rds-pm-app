@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { PoliceReport } from '../types';
 import { 
   Search, 
@@ -13,56 +13,251 @@ import {
   Activity, 
   Trash2, 
   Printer, 
-  Download, 
-  ExternalLink, 
-  User, 
   Calendar, 
   Clock, 
   MapPin, 
-  Briefcase, 
   ChevronRight, 
   ShieldAlert, 
   Eye, 
   X,
-  FileCheck2
+  FileCheck2,
+  Paperclip,
+  CheckCircle,
+  FileSpreadsheet,
+  Users,
+  Car,
+  Briefcase,
+  Layers,
+  ArrowUpDown,
+  Laptop,
+  PlusCircle,
+  ChevronDown,
+  Info
 } from 'lucide-react';
 
 interface ReportListProps {
   reports: PoliceReport[];
   onDelete: (id: string) => Promise<boolean>;
   currentUserEmail: string;
+  onNavigateToForm?: () => void;
 }
 
-export default function ReportList({ reports, onDelete, currentUserEmail }: ReportListProps) {
+export default function ReportList({ reports, onDelete, currentUserEmail, onNavigateToForm }: ReportListProps) {
+  // Mobile and interactive state tabs
+  // 'dashboard' | 'records'
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'records'>('dashboard');
+  
+  // Search & Filtering States
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedShift, setSelectedShift] = useState('Todos');
   const [onlyWithSeizures, setOnlyWithSeizures] = useState(false);
+  
+  // Advanced search specs (Requested: Pesquisar por data, Pesquisar por policial, Relatórios do mês)
+  const [dateStart, setDateStart] = useState<string>('');
+  const [dateEnd, setDateEnd] = useState<string>('');
+  const [selectedOfficer, setSelectedOfficer] = useState<string>('Todos');
+  const [selectedMonth, setSelectedMonth] = useState<string>('Todos'); // Formato YYYY-MM
+  
+  // Modal states
   const [selectedReport, setSelectedReport] = useState<PoliceReport | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  
+  // Toggle filter visibility on mobile
+  const [filtersExpanded, setFiltersExpanded] = useState(false);
 
-  // Stats calculation
-  const totalReportsCount = reports.length;
-  const totalWeapons = reports.reduce((acc, r) => acc + (r.armas_apreendidas || 0), 0);
-  const totalAmmo = reports.reduce((acc, r) => acc + (r.municoes || 0), 0);
-  const totalDrugsWeightG = reports.reduce((acc, r) => acc + (r.drogas_peso || 0), 0);
-  const totalCashValues = reports.reduce((acc, r) => acc + (r.valores || 0), 0);
+  // Compute distinct commanders/officers on the current dataset for dropdown selection
+  const commandersList = useMemo(() => {
+    const set = new Set<string>();
+    reports.forEach(r => {
+      if (r.comandante_responsavel) set.add(r.comandante_responsavel.trim());
+    });
+    return Array.from(set).sort();
+  }, [reports]);
 
-  // Filter reports
-  const filteredReports = reports.filter(r => {
-    const matchesSearch = 
-      r.operacao.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      r.ocorrencias.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (r.user_email && r.user_email.toLowerCase().includes(searchTerm.toLowerCase())) ||
-      (r.armas_detalhes && r.armas_detalhes.toLowerCase().includes(searchTerm.toLowerCase())) ||
-      (r.drogas_detalhes && r.drogas_detalhes.toLowerCase().includes(searchTerm.toLowerCase()));
-
-    const matchesShift = selectedShift === 'Todos' || r.turno.includes(selectedShift);
+  // Compute distinct months present on the dataset (format: YYYY-MM)
+  const monthsList = useMemo(() => {
+    const list: { val: string; label: string }[] = [];
+    const keys = new Set<string>();
     
-    const hasSeizures = r.armas_apreendidas > 0 || r.municoes > 0 || r.drogas_peso > 0 || r.valores > 0;
-    const matchesSeizures = !onlyWithSeizures || hasSeizures;
+    // Sort reports chronologically to order months
+    const sortedReports = [...reports].sort((a, b) => b.created_at.localeCompare(a.created_at));
+    
+    sortedReports.forEach(r => {
+      try {
+        const d = new Date(r.created_at);
+        if (!isNaN(d.getTime())) {
+          const year = d.getFullYear();
+          const month = String(d.getMonth() + 1).padStart(2, '0');
+          const key = `${year}-${month}`;
+          
+          if (!keys.has(key)) {
+            keys.add(key);
+            const monthNames = [
+              'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
+              'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
+            ];
+            list.push({
+              val: key,
+              label: `${monthNames[d.getMonth()]} de ${year}`
+            });
+          }
+        }
+      } catch (e) {
+        // Keep moving
+      }
+    });
+    return list;
+  }, [reports]);
 
-    return matchesSearch && matchesShift && matchesSeizures;
-  });
+  // Handle Preset Fast Dates
+  const handleSetDateRangePreset = (preset: 'hoje' | '7dias' | 'esteMes' | 'todos') => {
+    const now = new Date();
+    const todayStr = now.toISOString().split('T')[0];
+    
+    if (preset === 'hoje') {
+      setDateStart(todayStr);
+      setDateEnd(todayStr);
+    } else if (preset === '7dias') {
+      const past = new Date();
+      past.setDate(now.getDate() - 7);
+      setDateStart(past.toISOString().split('T')[0]);
+      setDateEnd(todayStr);
+    } else if (preset === 'esteMes') {
+      const startOfMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+      setDateStart(startOfMonth);
+      setDateEnd(todayStr);
+    } else {
+      setDateStart('');
+      setDateEnd('');
+    }
+  };
+
+  // Main reports filtering algorithm
+  const filteredReports = useMemo(() => {
+    return reports.filter(r => {
+      // 1. Term Search matching
+      const matchesSearch = 
+        r.operacao.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        r.ocorrencias.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (r.user_email && r.user_email.toLowerCase().includes(searchTerm.toLowerCase())) ||
+        (r.armas_detalhes && r.armas_detalhes.toLowerCase().includes(searchTerm.toLowerCase())) ||
+        (r.drogas_detalhes && r.drogas_detalhes.toLowerCase().includes(searchTerm.toLowerCase())) ||
+        (r.cidade && r.cidade.toLowerCase().includes(searchTerm.toLowerCase())) ||
+        (r.comandante_responsavel && r.comandante_responsavel.toLowerCase().includes(searchTerm.toLowerCase()));
+
+      // 2. Shift selection
+      const matchesShift = selectedShift === 'Todos' || r.turno.includes(selectedShift);
+      
+      // 3. Seizure focus checkbox
+      const hasSeizures = r.armas_apreendidas > 0 || r.municoes > 0 || r.drogas_peso > 0 || r.valores > 0;
+      const matchesSeizures = !onlyWithSeizures || hasSeizures;
+
+      // 4. Custom Date Range matching YYYY-MM-DD
+      const reportDateStr = r.created_at.split('T')[0];
+      const matchesDateStart = !dateStart || reportDateStr >= dateStart;
+      const matchesDateEnd = !dateEnd || reportDateStr <= dateEnd;
+
+      // 5. Policial name selection
+      const matchesOfficer = selectedOfficer === 'Todos' || r.comandante_responsavel === selectedOfficer;
+
+      // 6. Selected Month filter YYYY-MM
+      let matchesMonth = true;
+      if (selectedMonth !== 'Todos') {
+        const reportMonth = reportDateStr.substring(0, 7); // "YYYY-MM"
+        matchesMonth = reportMonth === selectedMonth;
+      }
+
+      return matchesSearch && matchesShift && matchesSeizures && matchesDateStart && matchesDateEnd && matchesOfficer && matchesMonth;
+    });
+  }, [reports, searchTerm, selectedShift, onlyWithSeizures, dateStart, dateEnd, selectedOfficer, selectedMonth]);
+
+  // Aggregate metrics calculation on filtered subset
+  const stats = useMemo(() => {
+    let weapons = 0;
+    let ammo = 0;
+    let drugs = 0;
+    let cash = 0;
+    let registeredVtrs = 0;
+    let actualOfficers = 0;
+    let suspeitosConduzidos = 0;
+    
+    // Nature counts
+    const natures: { [key: string]: number } = {};
+    // Cities counts
+    const cities: { [key: string]: number } = {};
+    // Shift counts
+    const shiftMap = { Matutino: 0, Vespertino: 0, Noturno: 0, Outros: 0 };
+    // KM distance
+    let kmTravelled = 0;
+
+    filteredReports.forEach(r => {
+      weapons += r.armas_apreendidas || 0;
+      ammo += r.municoes || 0;
+      drugs += r.drogas_peso || 0;
+      cash += r.valores || 0;
+      registeredVtrs += r.viaturas || 0;
+      actualOfficers += r.efetivo || 0;
+
+      // Count shift distribution
+      const shiftName = r.turno.toLowerCase();
+      if (shiftName.includes('noturno')) {
+        shiftMap.Noturno += 1;
+      } else if (shiftName.includes('vespertino')) {
+        shiftMap.Vespertino += 1;
+      } else if (shiftName.includes('matutino')) {
+        shiftMap.Matutino += 1;
+      } else {
+        shiftMap.Outros += 1;
+      }
+
+      // Compile City counts
+      const city = r.cidade || 'Cuiabá';
+      cities[city] = (cities[city] || 0) + 1;
+
+      // Core suspects from occurrences
+      if (r.lista_ocorrencias) {
+        r.lista_ocorrencias.forEach(oco => {
+          suspeitosConduzidos += oco.suspeitos_conduzidos || 0;
+          const nature = oco.natureza_ocorrencia || 'Outras Ocorrências';
+          natures[nature] = (natures[nature] || 0) + 1;
+        });
+      }
+
+      // Accrued KM
+      if (r.lista_viaturas) {
+        r.lista_viaturas.forEach(v => {
+          if (v.km_final && v.km_inicial && v.km_final >= v.km_inicial) {
+            kmTravelled += (v.km_final - v.km_inicial);
+          }
+        });
+      }
+    });
+
+    // Sort natures descending
+    const topNatures = Object.entries(natures)
+      .map(([name, val]) => ({ name, val }))
+      .sort((a, b) => b.val - a.val)
+      .slice(0, 5);
+
+    const topCities = Object.entries(cities)
+      .map(([name, val]) => ({ name, val }))
+      .sort((a, b) => b.val - a.val);
+
+    return {
+      weapons,
+      ammo,
+      drugs,
+      cash,
+      registeredVtrs,
+      actualOfficers,
+      suspeitosConduzidos,
+      topNatures,
+      topCities,
+      shifts: shiftMap,
+      kmTravelled,
+      count: filteredReports.length
+    };
+  }, [filteredReports]);
 
   const handleDeleteClick = async (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
@@ -70,6 +265,9 @@ export default function ReportList({ reports, onDelete, currentUserEmail }: Repo
       setDeletingId(id);
       try {
         await onDelete(id);
+        if (selectedReport?.id === id) {
+          setSelectedReport(null);
+        }
       } catch (err) {
         console.error('Falha ao deletar:', err);
       } finally {
@@ -104,280 +302,686 @@ export default function ReportList({ reports, onDelete, currentUserEmail }: Repo
     window.print();
   };
 
+  const totalReportsEver = reports.length;
+
   return (
-    <div className="space-y-6" id="report-list-container">
+    <div className="space-y-6" id="dashboard-institucional-container">
       
-      {/* SECTION CARD: STATISTICAL OVERVIEW (BENTO STYLE) */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4" id="stats-dashboard-grid">
-        {/* Metric 1 */}
-        <div className="bg-slate-900 border border-slate-850 rounded-xl p-4 flex flex-col justify-between shadow-lg relative overflow-hidden transition-all hover:border-slate-800">
-          <div className="flex justify-between items-start mb-2">
-            <span className="text-[11px] font-mono font-semibold tracking-wider text-slate-400 uppercase">Armas Apreendidas</span>
-            <span className="p-1.5 bg-blue-950/80 border border-blue-900 text-blue-400 rounded-lg">
-              <ShieldAlert className="h-4 w-4" />
-            </span>
-          </div>
-          <div>
-            <span className="text-2xl font-black text-white block tracking-tight font-sans">
-              {totalWeapons}
-            </span>
-            <span className="text-[10px] text-slate-500 font-mono">
-              unidades de fogo registradas
-            </span>
-          </div>
-          <div className="absolute -bottom-6 -right-6 text-slate-800/10 opacity-30 pointer-events-none">
-            <ShieldAlert className="h-24 w-24" />
-          </div>
-        </div>
-
-        {/* Metric 2 */}
-        <div className="bg-slate-900 border border-slate-850 rounded-xl p-4 flex flex-col justify-between shadow-lg relative overflow-hidden transition-all hover:border-slate-800">
-          <div className="flex justify-between items-start mb-2">
-            <span className="text-[11px] font-mono font-semibold tracking-wider text-slate-400 uppercase">Munição</span>
-            <span className="p-1.5 bg-blue-950/80 border border-blue-900 text-blue-400 rounded-lg">
-              <TrendingUp className="h-4 w-4" />
-            </span>
-          </div>
-          <div>
-            <span className="text-2xl font-black text-white block tracking-tight font-sans">
-              {totalAmmo}
-            </span>
-            <span className="text-[10px] text-slate-500 font-mono">
-              cartuchos intactos e deflagrados
-            </span>
-          </div>
-          <div className="absolute -bottom-6 -right-6 text-slate-800/10 opacity-30 pointer-events-none">
-            <TrendingUp className="h-24 w-24" />
-          </div>
-        </div>
-
-        {/* Metric 3 */}
-        <div className="bg-slate-900 border border-slate-850 rounded-xl p-4 flex flex-col justify-between shadow-lg relative overflow-hidden transition-all hover:border-slate-800">
-          <div className="flex justify-between items-start mb-2">
-            <span className="text-[11px] font-mono font-semibold tracking-wider text-slate-400 uppercase">Drogas Entorpecentes</span>
-            <span className="p-1.5 bg-blue-950/80 border border-blue-900 text-blue-400 rounded-lg">
-              <Activity className="h-4 w-4" />
-            </span>
-          </div>
-          <div>
-            <span className="text-2xl font-black text-white block tracking-tight font-sans">
-              {totalDrugsWeightG >= 1000 ? `${(totalDrugsWeightG / 1000).toFixed(2)} kg` : `${totalDrugsWeightG} g`}
-            </span>
-            <span className="text-[10px] text-slate-500 font-mono">
-              peso total de drogas retidas
-            </span>
-          </div>
-          <div className="absolute -bottom-6 -right-6 text-slate-800/10 opacity-30 pointer-events-none">
-            <Activity className="h-24 w-24" />
-          </div>
-        </div>
-
-        {/* Metric 4 */}
-        <div className="bg-slate-900 border border-slate-850 rounded-xl p-4 flex flex-col justify-between shadow-lg relative overflow-hidden transition-all hover:border-slate-800">
-          <div className="flex justify-between items-start mb-2">
-            <span className="text-[11px] font-mono font-semibold tracking-wider text-slate-400 uppercase">Dinheiro / Valores</span>
-            <span className="p-1.5 bg-emerald-950/80 border border-emerald-900 text-emerald-400 rounded-lg">
-              <Coins className="h-4 w-4" />
-            </span>
-          </div>
-          <div>
-            <span className="text-2xl font-black text-emerald-400 block tracking-tight font-sans">
-              {formatCurrency(totalCashValues)}
-            </span>
-            <span className="text-[10px] text-slate-500 font-mono">
-              valores recuperados/apreendidos
-            </span>
-          </div>
-          <div className="absolute -bottom-6 -right-6 text-emerald-800/5 opacity-30 pointer-events-none">
-            <Coins className="h-24 w-24" />
-          </div>
-        </div>
-      </div>
-
-      {/* FILTER & INTERACTIVE SEARCH CONTROLS */}
-      <div className="bg-slate-900 border border-slate-850 rounded-xl p-5 shadow-md flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between" id="search-filter-controls">
-        {/* Search */}
-        <div className="relative flex-1">
-          <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-            <Search className="h-4 w-4 text-slate-500" />
-          </div>
-          <input
-            type="text"
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            placeholder="Buscar por Operação, apreensões ou descritivo..."
-            className="w-full bg-slate-950 border border-slate-800 text-slate-200 text-sm rounded-lg pl-10 pr-4 py-2 outline-none focus:border-amber-400 focus:ring-1 focus:ring-amber-400 transition"
-          />
-        </div>
-
-        {/* Select Shift Filter */}
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="flex items-center gap-1.5 text-xs text-slate-400 font-mono">
-            <Filter className="h-3.5 w-3.5 text-slate-500" />
-            <span>Turno:</span>
-          </div>
-          <div className="flex gap-1 bg-slate-950 p-1 rounded-lg border border-slate-800">
-            {['Todos', 'Vespertino', 'Noturno', 'Matutino'].map((sh) => (
-              <button
-                key={sh}
-                type="button"
-                onClick={() => setSelectedShift(sh)}
-                className={`px-3 py-1 text-xs font-semibold rounded-md transition-all ${
-                  selectedShift === sh 
-                    ? 'bg-blue-800 text-white shadow-sm' 
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                {sh}
-              </button>
-            ))}
-          </div>
-
-          <label className="inline-flex items-center gap-2 cursor-pointer bg-slate-950 border border-slate-800 hover:border-slate-750 px-3 py-1.5 rounded-lg transition">
-            <input
-              type="checkbox"
-              checked={onlyWithSeizures}
-              onChange={(e) => setOnlyWithSeizures(e.target.checked)}
-              className="rounded accent-amber-400 border-slate-800 focus:ring-0 w-3.5 h-3.5"
-            />
-            <span className="text-xs text-slate-300 font-medium">Apenas com Apreensões</span>
-          </label>
-        </div>
-      </div>
-
-      {/* REPORTS LISTING */}
-      {filteredReports.length === 0 ? (
-        <div className="bg-slate-900 border border-slate-850 rounded-xl p-12 text-center" id="empty-search-state">
-          <FileCheck2 className="h-12 w-12 text-slate-600 mx-auto mb-3" />
-          <h4 className="text-base font-bold text-slate-300">Nenhum relatório localizado</h4>
-          <p className="text-xs text-slate-500 mt-1 max-w-sm mx-auto">
-            Tente redefinir os filtros corporativos ou realizar outra busca digitando novos calibres, operações ou palavras-chave.
-          </p>
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4" id="reports-grid-list">
-          {filteredReports.map((report) => {
-            const hasAnyApreensão = report.armas_apreendidas > 0 || report.municoes > 0 || report.drogas_peso > 0 || report.valores > 0;
-
-            return (
-              <div
-                key={report.id}
-                onClick={() => setSelectedReport(report)}
-                className="bg-slate-900 border border-slate-850 hover:border-slate-700/80 rounded-xl p-5 shadow-md flex flex-col justify-between cursor-pointer transition-all hover:translate-y-[-2px] hover:shadow-lg group"
-              >
-                <div>
-                  {/* Operation Header */}
-                  <div className="flex justify-between items-start gap-2 mb-3">
-                    <div>
-                      <span className="inline-flex items-center gap-1 text-[10px] text-amber-400 bg-amber-950/40 border border-amber-900/60 rounded px-2 py-0.5 font-mono uppercase mb-1 font-semibold">
-                        {report.turno.split(' (')[0]}
-                      </span>
-                      <h4 className="text-sm font-bold text-slate-100 group-hover:text-amber-400 transition mb-0.5 line-clamp-1">
-                        {report.operacao}
-                      </h4>
-                    </div>
-                    {/* View Details Button icon */}
-                    <span className="p-1.5 bg-slate-950 border border-slate-800 text-slate-400 rounded-lg group-hover:bg-blue-950 group-hover:border-blue-950 group-hover:text-blue-400 transition duration-150">
-                      <ChevronRight className="h-4 w-4" />
-                    </span>
-                  </div>
-
-                  {/* Summary/Narrative snippet */}
-                  <p className="text-xs text-slate-450 line-clamp-3 leading-relaxed mb-4 font-normal">
-                    {report.ocorrencias}
-                  </p>
-                </div>
-
-                {/* Footer specs / Seized quick stats */}
-                <div className="border-t border-slate-800/80 pt-3 mt-1 flex flex-col gap-2">
-                  <div className="flex flex-wrap items-center justify-between text-[11px] text-slate-500 font-mono">
-                    <span className="flex items-center gap-1 truncate max-w-[200px]">
-                      <User className="h-3 w-3 text-slate-600" />
-                      {report.user_email ? report.user_email.split('@')[0] : 'Admin'}
-                    </span>
-                    <span className="flex items-center gap-1">
-                      <Clock className="h-3 w-3 text-slate-600" />
-                      {formatDateString(report.created_at)}
-                    </span>
-                  </div>
-
-                  {/* Badges of apprehensions */}
-                  <div className="flex flex-wrap gap-1.5 pt-1">
-                    <span className="text-[10px] bg-slate-955 border border-slate-800 rounded px-1.5 py-0.5 text-slate-400 font-mono">
-                      EFETIVO: <strong className="text-slate-200">{report.efetivo}</strong>
-                    </span>
-                    <span className="text-[10px] bg-slate-955 border border-slate-800 rounded px-1.5 py-0.5 text-slate-400 font-mono">
-                      VTRS: <strong className="text-slate-200">{report.viaturas}</strong>
-                    </span>
-                    
-                    {report.armas_apreendidas > 0 && (
-                      <span className="text-[10px] bg-red-950/40 border border-red-900/60 text-red-400 rounded px-1.5 py-0.5 font-mono font-semibold">
-                        ARMAS: {report.armas_apreendidas}
-                      </span>
-                    )}
-
-                    {report.municoes > 0 && (
-                      <span className="text-[10px] bg-amber-950/30 border border-amber-900/40 text-amber-300 rounded px-1.5 py-0.5 font-mono font-semibold">
-                        MUNIÇÕES: {report.municoes}
-                      </span>
-                    )}
-
-                    {report.drogas_peso > 0 && (
-                      <span className="text-[10px] bg-blue-950/40 border border-blue-900/50 text-blue-400 rounded px-1.5 py-0.5 font-mono font-semibold">
-                        DROGAS: {report.drogas_peso}g
-                      </span>
-                    )}
-
-                    {report.valores > 0 && (
-                      <span className="text-[10px] bg-emerald-950/40 border border-emerald-900/50 text-emerald-400 rounded px-1.5 py-0.5 font-mono font-semibold">
-                        VALORES: R$ {report.valores}
-                      </span>
-                    )}
-                  </div>
-
-                  {/* Operational actions */}
-                  <div className="flex justify-end gap-2 pt-2 border-t border-slate-800/40 mt-1">
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setSelectedReport(report);
-                      }}
-                      className="text-xs font-mono font-semibold text-blue-400 hover:text-blue-300 transition-colors flex items-center gap-1 bg-slate-950 border border-slate-800/80 px-2 py-1 rounded"
-                    >
-                      <Eye className="h-3 w-3" />
-                      Visualizar Documento
-                    </button>
-
-                    {(currentUserEmail === report.user_email || report.id.startsWith('report-local-')) && (
-                      <button
-                        type="button"
-                        disabled={deletingId === report.id}
-                        onClick={(e) => handleDeleteClick(e, report.id)}
-                        className="text-xs font-mono font-semibold text-red-400 hover:text-red-300 transition-colors flex items-center gap-1 bg-slate-950 border border-slate-800/80 px-2.5 py-1 rounded hover:bg-red-950/20"
-                      >
-                        <Trash2 className="h-3 w-3" />
-                        Excluir
-                      </button>
-                    )}
-                  </div>
-                </div>
+      {/* INSTITUTIONAL SUB HEADER BANNER WITH TOTALIZERS */}
+      <div className="relative bg-gradient-to-r from-slate-900 via-slate-900 to-blue-950/80 border border-slate-800 rounded-2xl p-5 md:p-6 overflow-hidden shadow-2xl" id="pmmt-badge-banner">
+        <div className="absolute top-0 right-0 h-full w-1/3 opacity-5 pointer-events-none bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-amber-400 via-transparent to-transparent"></div>
+        
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 relative z-10">
+          <div className="flex items-start md:items-center gap-4">
+            <div className="hidden sm:flex w-14 h-14 rounded-xl bg-blue-900/60 border-2 border-amber-400/70 shadow-lg shadow-blue-950/50 items-center justify-center p-2 text-amber-400 shrink-0">
+              <svg viewBox="0 0 100 100" className="w-full h-full fill-current">
+                <polygon points="50,10 62,38 91,38 67,56 76,85 50,67 24,85 33,56 9,38 38,38" />
+              </svg>
+            </div>
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-[10px] font-bold font-mono px-2 py-0.5 bg-amber-500/20 text-amber-300 border border-amber-500/30 rounded uppercase tracking-wider">PMMT Oficial</span>
+                <span className="text-[10px] font-bold font-mono px-2 py-0.5 bg-blue-500/10 text-blue-300 border border-blue-500/20 rounded uppercase tracking-wider">Subdivisão SESP-MT</span>
               </div>
-            );
-          })}
+              <h1 className="text-xl md:text-2xl font-black text-white font-sans tracking-tight mt-1.5 uppercase">
+                Painel Tático SESP/PMMT
+              </h1>
+              <p className="text-xs text-slate-400 mt-0.5 max-w-xl">
+                Controle eletrônico institucional de efetivo, viaturas, ocorrências e apreensão integrada de bens ilícitos em Mato Grosso.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-row md:flex-col items-baseline md:items-end justify-between border-t border-slate-800/80 pt-3 md:pt-0 md:border-t-0 shrink-0">
+            <div className="text-left md:text-right">
+              <span className="block text-[10px] text-slate-500 uppercase font-bold tracking-wider font-mono">Balanço do Período</span>
+              <span className="text-xl md:text-2xl font-black text-emerald-400 font-sans mt-0.5">
+                {stats.count} de {totalReportsEver}
+              </span>
+              <span className="text-[10px] text-slate-400 block font-mono">RDS filtrados no livro</span>
+            </div>
+            
+            {onNavigateToForm && (
+              <button
+                type="button"
+                onClick={onNavigateToForm}
+                className="md:mt-3 bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold px-4 py-2 rounded-lg flex items-center gap-1.5 transition shadow-lg active:scale-95 cursor-pointer max-w-max"
+              >
+                <PlusCircle className="h-4 w-4 text-slate-950" />
+                <span>Novo RDS</span>
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* SEARCH AND CONTROL TOWER PANEL */}
+      <div className="bg-slate-900 border border-slate-850 rounded-xl p-4 md:p-5 shadow-lg space-y-4" id="police-control-tower">
+        <div className="flex items-center justify-between border-b border-slate-800/80 pb-3">
+          <div className="flex items-center gap-2">
+            <Filter className="h-4 w-4 text-amber-400" />
+            <h3 className="text-sm font-bold font-sans text-slate-200">Filtros Avançados de Auditoria</h3>
+          </div>
+          
+          <button
+            type="button"
+            onClick={() => setFiltersExpanded(!filtersExpanded)}
+            className="md:hidden text-xs text-blue-400 font-semibold flex items-center gap-1 bg-slate-950 border border-slate-800 px-2.5 py-1 rounded-md"
+          >
+            <span>{filtersExpanded ? 'Ocultar Filtros' : 'Mostrar Filtros'}</span>
+            <ChevronDown className={`h-3.5 w-3.5 transition-transform ${filtersExpanded ? 'rotate-180' : ''}`} />
+          </button>
+        </div>
+
+        {/* Filters grid */}
+        <div className={`grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 ${filtersExpanded ? 'block' : 'hidden md:grid'}`} id="filters-interactive-block">
+          
+          {/* SEARCH FIELD */}
+          <div className="space-y-1.5">
+            <label className="text-[11px] font-mono font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1">
+              <Search className="h-3 w-3 text-slate-500" />
+              <span>Busca textual</span>
+            </label>
+            <div className="relative">
+              <input
+                type="text"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                placeholder="Operação, cidade, palavras..."
+                className="w-full bg-slate-950 border border-slate-800 text-slate-200 text-xs rounded-lg pl-3 pr-3 py-2.5 outline-none focus:border-amber-400 focus:ring-1 focus:ring-amber-400 transition"
+              />
+              {searchTerm && (
+                <button 
+                  type="button" 
+                  onClick={() => setSearchTerm('')} 
+                  className="absolute right-2 px-1.5 py-1 text-slate-400 hover:text-white top-1/2 -translate-y-1/2 text-[10px] font-sans font-bold"
+                >
+                  X
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* POLICE OFFICER SELECTOR */}
+          <div className="space-y-1.5">
+            <label className="text-[11px] font-mono font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1">
+              <Users className="h-3 w-3 text-slate-500" />
+              <span>Comandante / Policial</span>
+            </label>
+            <select
+              value={selectedOfficer}
+              onChange={(e) => setSelectedOfficer(e.target.value)}
+              className="w-full bg-slate-950 border border-slate-800 text-slate-200 text-xs rounded-lg px-3 py-2.5 outline-none focus:border-amber-400 focus:ring-1 focus:ring-amber-400 transition cursor-pointer"
+            >
+              <option value="Todos">Todos os Militares</option>
+              {commandersList.map(off => (
+                <option key={off} value={off}>{off}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* CHOOSE TARGET MONTH (Relatórios do Mês) */}
+          <div className="space-y-1.5">
+            <label className="text-[11px] font-mono font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1">
+              <Calendar className="h-3 w-3 text-slate-500" />
+              <span>Relatórios do Mês</span>
+            </label>
+            <select
+              value={selectedMonth}
+              onChange={(e) => setSelectedMonth(e.target.value)}
+              className="w-full bg-slate-950 border border-slate-800 text-slate-200 text-xs rounded-lg px-3 py-2.5 outline-none focus:border-amber-400 focus:ring-1 focus:ring-amber-400 transition cursor-pointer"
+            >
+              <option value="Todos">Todos os Meses</option>
+              {monthsList.map(m => (
+                <option key={m.val} value={m.val}>{m.label}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* TURN / SHIFT FILTER */}
+          <div className="space-y-1.5">
+            <label className="text-[11px] font-mono font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1">
+              <Clock className="h-3 w-3 text-slate-500" />
+              <span>Turno Operacional</span>
+            </label>
+            <div className="flex gap-1 bg-slate-950 p-1.5 rounded-lg border border-slate-800">
+              {['Todos', 'Vesp', 'Notu', 'Matu'].map((sh) => {
+                const mapShToFull = sh === 'Vesp' ? 'Vespertino' : sh === 'Notu' ? 'Noturno' : sh === 'Matu' ? 'Matutino' : 'Todos';
+                const isActive = (selectedShift === 'Todos' && mapShToFull === 'Todos') || (selectedShift !== 'Todos' && selectedShift.includes(mapShToFull));
+                return (
+                  <button
+                    key={sh}
+                    type="button"
+                    onClick={() => setSelectedShift(mapShToFull)}
+                    className={`flex-1 text-center py-1.5 text-[10px] font-bold rounded transition-all ${
+                      isActive 
+                        ? 'bg-blue-800 text-white shadow-sm' 
+                        : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    {sh}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+
+        {/* ADVANCED DATE RANGE (Pesquisar por data) & FAST ACTION CHECKS */}
+        <div className={`grid grid-cols-1 lg:grid-cols-12 gap-4 pt-3 border-t border-indigo-950/40 ${filtersExpanded ? 'block' : 'hidden md:grid'}`} id="date-range-segment">
+          
+          {/* Calendar picker dates */}
+          <div className="lg:col-span-8 grid grid-cols-2 gap-3 items-end">
+            <div className="space-y-1.5">
+              <span className="text-[10px] font-mono text-slate-400 font-bold uppercase block">Início da Ronda</span>
+              <div className="relative">
+                <input
+                  type="date"
+                  value={dateStart}
+                  onChange={(e) => setDateStart(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 text-slate-300 text-xs rounded-lg px-2.5 py-2 outline-none focus:border-amber-400 transition"
+                />
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <span className="text-[10px] font-mono text-slate-400 font-bold uppercase block">Término da Ronda</span>
+              <div className="relative">
+                <input
+                  type="date"
+                  value={dateEnd}
+                  onChange={(e) => setDateEnd(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 text-slate-300 text-xs rounded-lg px-2.5 py-2 outline-none focus:border-amber-400 transition"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Quick ranges buttons and seizure check */}
+          <div className="lg:col-span-4 flex flex-col sm:flex-row lg:flex-col justify-end gap-2">
+            <div className="flex gap-1">
+              <button
+                type="button"
+                onClick={() => handleSetDateRangePreset('hoje')}
+                className="flex-1 py-1 px-2 text-[10px] font-semibold bg-slate-950 border border-slate-850 hover:bg-slate-800 rounded text-slate-400 hover:text-slate-200 transition"
+              >
+                Hoje
+              </button>
+              <button
+                type="button"
+                onClick={() => handleSetDateRangePreset('7dias')}
+                className="flex-1 py-1 px-2 text-[10px] font-semibold bg-slate-950 border border-slate-850 hover:bg-slate-800 rounded text-slate-400 hover:text-slate-200 transition"
+              >
+                7 Dias
+              </button>
+              <button
+                type="button"
+                onClick={() => handleSetDateRangePreset('esteMes')}
+                className="flex-1 py-1 px-2 text-[10px] font-semibold bg-slate-950 border border-slate-850 hover:bg-slate-800 rounded text-slate-400 hover:text-slate-200 transition"
+              >
+                Este Mês
+              </button>
+              <button
+                type="button"
+                onClick={() => handleSetDateRangePreset('todos')}
+                className="py-1 px-2 text-[10px] bg-slate-950/60 border border-slate-850 hover:bg-slate-800 rounded text-amber-400 hover:text-white font-black transition"
+              >
+                Limpar
+              </button>
+            </div>
+
+            <label className="inline-flex items-center justify-center gap-2 cursor-pointer bg-slate-950 border border-slate-800 hover:border-slate-750 px-3 py-2 rounded-lg transition text-slate-300">
+              <input
+                type="checkbox"
+                checked={onlyWithSeizures}
+                onChange={(e) => setOnlyWithSeizures(e.target.checked)}
+                className="rounded accent-amber-400 border-slate-850 focus:ring-0 w-3.5 h-3.5"
+              />
+              <span className="text-[11px] font-bold font-mono">Apenas com apreensão de ilícitos</span>
+            </label>
+          </div>
+        </div>
+      </div>
+
+      {/* CORE CONTROL DESKTOP AND MOBILE TAB HEADS */}
+      <div className="flex bg-slate-900 border border-slate-850 p-1.5 rounded-xl gap-2" id="dashboard-tab-selectors">
+        <button
+          type="button"
+          onClick={() => setActiveTab('dashboard')}
+          className={`flex-1 py-3 text-xs md:text-sm font-extrabold uppercase tracking-wider rounded-lg transition-all flex items-center justify-center gap-2.5 cursor-pointer ${
+            activeTab === 'dashboard'
+              ? 'bg-gradient-to-r from-blue-900 to-indigo-900 border border-blue-700 text-white shadow-md'
+              : 'text-slate-400 hover:text-slate-205 hover:bg-slate-950/60'
+          }`}
+        >
+          <TrendingUp className="h-4 w-4" />
+          <span>Estatísticas & Produtividade</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab('records')}
+          className={`flex-1 py-3 text-xs md:text-sm font-extrabold uppercase tracking-wider rounded-lg transition-all flex items-center justify-center gap-2.5 cursor-pointer ${
+            activeTab === 'records'
+              ? 'bg-gradient-to-r from-blue-900 to-indigo-900 border border-blue-700 text-white shadow-md'
+              : 'text-slate-400 hover:text-slate-205 hover:bg-slate-950/60'
+          }`}
+        >
+          <FileCheck2 className="h-4 w-4" />
+          <span>Livro de Registros RDS ({filteredReports.length})</span>
+        </button>
+      </div>
+
+      {/* SHOW VIEW 1: ESTATÍSTICAS E PRODUTIVIDADE */}
+      {activeTab === 'dashboard' && (
+        <div className="space-y-6 animate-fadeIn" id="dashboard-statistics-view">
+          
+          {/* STATS COUNTED (BENTO STYLE) */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4" id="stats-dashboard-grid-advanced">
+            {/* Metric 1: Weapons armed */}
+            <div className="bg-slate-900 border border-slate-850 rounded-xl p-4 flex flex-col justify-between shadow-lg relative overflow-hidden transition-all hover:bg-slate-850/80">
+              <div className="flex justify-between items-start mb-2">
+                <span className="text-[11px] font-mono font-semibold tracking-wider text-slate-400 uppercase">Armas de Fogo</span>
+                <span className="p-1.5 bg-red-950/80 border border-red-900 text-red-400 rounded-lg">
+                  <ShieldAlert className="h-4 w-4 animate-pulse" />
+                </span>
+              </div>
+              <div className="z-10 relative">
+                <span className="text-3xl font-black text-white block tracking-tight font-sans">
+                  {stats.weapons}
+                </span>
+                <span className="text-[10px] text-slate-400 font-mono">
+                  retiradas de circulação
+                </span>
+              </div>
+              <div className="absolute -bottom-6 -right-6 text-red-500/5 opacity-50 pointer-events-none">
+                <ShieldAlert className="h-24 w-24" />
+              </div>
+            </div>
+
+            {/* Metric 2: Munitions intact */}
+            <div className="bg-slate-900 border border-slate-850 rounded-xl p-4 flex flex-col justify-between shadow-lg relative overflow-hidden transition-all hover:bg-slate-850/80">
+              <div className="flex justify-between items-start mb-2">
+                <span className="text-[11px] font-mono font-semibold tracking-wider text-slate-400 uppercase">Munições</span>
+                <span className="p-1.5 bg-amber-950/80 border border-amber-900 text-amber-400 rounded-lg">
+                  <TrendingUp className="h-4 w-4" />
+                </span>
+              </div>
+              <div className="z-10 relative">
+                <span className="text-3xl font-black text-white block tracking-tight font-sans">
+                  {stats.ammo}
+                </span>
+                <span className="text-[10px] text-slate-400 font-mono">
+                  cartuchos apreendidos
+                </span>
+              </div>
+              <div className="absolute -bottom-6 -right-6 text-amber-500/5 opacity-50 pointer-events-none">
+                <TrendingUp className="h-24 w-24" />
+              </div>
+            </div>
+
+            {/* Metric 3: Drugs and Narcotics weight */}
+            <div className="bg-slate-900 border border-slate-850 rounded-xl p-4 flex flex-col justify-between shadow-lg relative overflow-hidden transition-all hover:bg-slate-850/80">
+              <div className="flex justify-between items-start mb-2">
+                <span className="text-[11px] font-mono font-semibold tracking-wider text-slate-400 uppercase">Entorpecentes</span>
+                <span className="p-1.5 bg-indigo-950/80 border border-indigo-900 text-indigo-400 rounded-lg">
+                  <Activity className="h-4 w-4" />
+                </span>
+              </div>
+              <div className="z-10 relative">
+                <span className="text-3xl font-black text-white block tracking-tight font-sans">
+                  {stats.drugs >= 1000 ? `${(stats.drugs / 1000).toFixed(2)} kg` : `${stats.drugs} g`}
+                </span>
+                <span className="text-[10px] text-slate-400 font-mono">
+                  material prensado e fracionado
+                </span>
+              </div>
+              <div className="absolute -bottom-6 -right-6 text-indigo-505/5 opacity-50 pointer-events-none">
+                <Activity className="h-24 w-24" />
+              </div>
+            </div>
+
+            {/* Metric 4: Cash flow */}
+            <div className="bg-slate-900 border border-slate-850 rounded-xl p-4 flex flex-col justify-between shadow-lg relative overflow-hidden transition-all hover:bg-slate-850/80">
+              <div className="flex justify-between items-start mb-2">
+                <span className="text-[11px] font-mono font-semibold tracking-wider text-slate-400 uppercase">Apreensão em Dinheiro</span>
+                <span className="p-1.5 bg-emerald-950/80 border border-emerald-900 text-emerald-400 rounded-lg">
+                  <Coins className="h-4 w-4" />
+                </span>
+              </div>
+              <div className="z-10 relative">
+                <span className="text-3xl font-black text-emerald-400 block tracking-tight font-sans">
+                  {formatCurrency(stats.cash)}
+                </span>
+                <span className="text-[10px] text-slate-400 font-mono">
+                  bens e moeda convertida
+                </span>
+              </div>
+              <div className="absolute -bottom-6 -right-6 text-emerald-500/5 opacity-50 pointer-events-none">
+                <Coins className="h-24 w-24" />
+              </div>
+            </div>
+          </div>
+
+          {/* SECONDARY TOTALS GRID FOR GENERAL LOGISTICS */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4" id="logistics-totals-grid">
+            {/* Total policing hours / count */}
+            <div className="bg-slate-900/60 border border-slate-850 rounded-xl p-3 text-center">
+              <span className="text-[10px] font-mono font-bold text-slate-450 uppercase block">Rondas Executadas</span>
+              <span className="text-lg font-black text-slate-200 mt-1 block">{stats.count} turnos</span>
+            </div>
+            {/* Officers active */}
+            <div className="bg-slate-900/60 border border-slate-850 rounded-xl p-3 text-center">
+              <span className="text-[10px] font-mono font-bold text-slate-450 uppercase block">Efetivo Homem/Serviço</span>
+              <span className="text-lg font-black text-slate-200 mt-1 block">{stats.actualOfficers} PMs</span>
+            </div>
+            {/* Vehicles overall */}
+            <div className="bg-slate-900/60 border border-slate-850 rounded-xl p-3 text-center">
+              <span className="text-[10px] font-mono font-bold text-slate-450 uppercase block">Viaturas Lançadas</span>
+              <span className="text-lg font-black text-slate-200 mt-1 block">{stats.registeredVtrs} VTRs</span>
+            </div>
+            {/* Mileage traversed */}
+            <div className="bg-slate-900/60 border border-slate-850 rounded-xl p-3 text-center">
+              <span className="text-[10px] font-mono font-bold text-slate-450 uppercase block">Distância de Patrulha</span>
+              <span className="text-lg font-black text-slate-200 mt-1 block">{stats.kmTravelled} km</span>
+            </div>
+          </div>
+
+          {/* COMPEX SVG CHARTS AND RANKINGS ROW */}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6" id="dashboard-complex-diagrams">
+            
+            {/* Chart 1: Core crime natures compiled (Bento Grid 7 cols) */}
+            <div className="lg:col-span-7 bg-slate-900 border border-slate-850 rounded-xl p-5 shadow-md flex flex-col justify-between">
+              <div>
+                <div className="flex justify-between items-start mb-4">
+                  <div>
+                    <h3 className="text-sm font-bold text-slate-150 uppercase tracking-wide font-sans">Ocorrências por Natureza Tática</h3>
+                    <p className="text-[11px] text-slate-500">Ranking das denúncias com maior incidência criminal mapeada</p>
+                  </div>
+                  <span className="text-[10px] font-mono font-bold px-2 py-0.5 bg-slate-800 text-slate-400 rounded">
+                    Top {stats.topNatures.length}
+                  </span>
+                </div>
+
+                {stats.topNatures.length === 0 ? (
+                  <div className="text-center py-10">
+                    <Info className="h-8 w-8 text-slate-655 mx-auto mb-2" />
+                    <p className="text-xs text-slate-500">Sem dados específicos registrados. Lance ocorrências estruturadas para preencher o ranking.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-4 pt-2">
+                    {stats.topNatures.map((item, index) => {
+                      const maxVal = Math.max(...stats.topNatures.map(n => n.val), 1);
+                      const percentage = (item.val / maxVal) * 100;
+                      return (
+                        <div key={item.name} className="space-y-1">
+                          <div className="flex justify-between text-xs">
+                            <span className="font-bold text-slate-300 flex items-center gap-2">
+                              <span className="w-4 h-4 rounded-full bg-blue-950 border border-blue-800 text-[10px] flex items-center justify-center text-blue-400 font-mono">
+                                {index + 1}
+                              </span>
+                              {item.name}
+                            </span>
+                            <span className="font-mono text-amber-400 font-bold">{item.val} ocorrência(s)</span>
+                          </div>
+                          <div className="w-full bg-slate-950 h-2 rounded-full overflow-hidden border border-slate-800">
+                            <div 
+                              className="bg-gradient-to-r from-blue-750 to-indigo-600 h-full rounded-full transition-all duration-500"
+                              style={{ width: `${percentage}%` }}
+                            />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              <div className="border-t border-slate-800/60 pt-3 mt-4 text-[10px] text-slate-450 font-mono flex items-center gap-1.5">
+                <CheckCircle className="h-3 w-3 text-emerald-500" />
+                <span>Integração de dados coletados diretamente via boletins de ocorrência.</span>
+              </div>
+            </div>
+
+            {/* Chart 2: Distribuicao por Turno / Cidades (Bento Grid 5 cols) */}
+            <div className="lg:col-span-5 bg-slate-900 border border-slate-850 rounded-xl p-5 shadow-md flex flex-col justify-between">
+              <div>
+                <h3 className="text-sm font-bold text-slate-150 uppercase tracking-wide font-sans mb-3">Escala Turno e Cidades</h3>
+                
+                {/* SVG shift visualizer */}
+                <span className="text-[10px] font-mono text-slate-500 uppercase font-black tracking-wider block mb-2">Volume por Horário</span>
+                <div className="space-y-2 mb-5">
+                  {[
+                    { label: 'Noturno', val: stats.shifts.Noturno, color: 'bg-blue-900 border-blue-500 text-blue-300' },
+                    { label: 'Vespertino', val: stats.shifts.Vespertino, color: 'bg-amber-950/60 border-amber-500/50 text-amber-300' },
+                    { label: 'Matutino', val: stats.shifts.Matutino, color: 'bg-emerald-950/60 border-emerald-500/50 text-emerald-300' }
+                  ].map(sh => {
+                    const totalShifts = stats.shifts.Noturno + stats.shifts.Vespertino + stats.shifts.Matutino + stats.shifts.Outros;
+                    const percent = totalShifts > 0 ? (sh.val / totalShifts) * 100 : 0;
+                    return (
+                      <div key={sh.label} className="flex items-center gap-2">
+                        <span className="w-20 text-xs text-slate-400 font-medium truncate">{sh.label}</span>
+                        <div className="flex-1 bg-slate-950 border border-slate-800 rounded h-5 overflow-hidden flex items-center relative">
+                          <div 
+                            className={`h-full opacity-60 transition-all duration-300 ${sh.color.split(' ')[0]}`}
+                            style={{ width: `${percent}%` }}
+                          />
+                          <span className="absolute left-2 text-[10px] font-mono font-bold text-slate-200">
+                            {sh.val} RDS ({percent.toFixed(0)}%)
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Cities top list */}
+                <span className="text-[10px] font-mono text-slate-500 uppercase font-black tracking-wider block mb-2 border-t border-slate-800/80 pt-3">Foco Municipal</span>
+                {stats.topCities.length === 0 ? (
+                  <p className="text-[11px] text-slate-500 italic">Sem registros municipais cadastrados.</p>
+                ) : (
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    {stats.topCities.slice(0, 4).map(c => (
+                      <div key={c.name} className="bg-slate-950 border border-slate-850 p-2 rounded flex flex-col justify-between">
+                        <span className="text-slate-400 font-bold block truncate">{c.name}</span>
+                        <span className="text-amber-400 font-mono text-[10px] mt-1 font-bold">{c.val} Relatórios</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Bottom print control */}
+              <div className="pt-4 mt-4 border-t border-slate-850">
+                <button
+                  type="button"
+                  onClick={handlePrintDocument}
+                  className="w-full bg-slate-950 hover:bg-slate-850 hover:text-white border border-slate-800 hover:border-slate-700 text-slate-300 font-bold text-xs py-2 rounded-lg flex items-center justify-center gap-1.5 transition active:scale-95 cursor-pointer"
+                >
+                  <Printer className="h-3.5 w-3.5 text-blue-400" />
+                  <span>Imprimir Balanço de Segurança (.pdf)</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* GENERAL NOTIFICATIONS BOX */}
+          <div className="bg-slate-900 border border-slate-850 rounded-xl p-4 flex flex-col sm:flex-row items-center gap-3">
+            <div className="p-2 bg-blue-950 border border-blue-900 text-blue-400 rounded-lg shrink-0">
+              <Laptop className="h-5 w-5" />
+            </div>
+            <div>
+              <h4 className="text-xs font-extrabold text-slate-200 uppercase tracking-widest font-mono">Consolidação Operacional da Diretoria</h4>
+              <p className="text-[11px] text-slate-400 mt-0.5 leading-relaxed">
+                Este painel calcula estatísticas agregadas em tempo real com base nos filtros indicados no topo. Para obter o relatório PDF oficial de um mês específico, configure o filtro **"Relatórios do Mês"** e utilize o botão de impressão acima.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* SHOW VIEW 2: LIVRO DE REGISTROS DO TURNO */}
+      {activeTab === 'records' && (
+        <div className="space-y-4 animate-fadeIn" id="records-list-tab-panel">
+          
+          <div className="flex justify-between items-center bg-slate-900/60 border border-slate-850 p-3 rounded-lg">
+            <span className="text-xs font-mono text-slate-430">
+              Visualizando <strong className="text-white">{filteredReports.length}</strong> relatórios de serviço localizados
+            </span>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setSearchTerm('')}
+                className="text-slate-400 hover:text-white text-xs underline cursor-pointer font-mono"
+              >
+                Resetar Busca
+              </button>
+            </div>
+          </div>
+
+          {/* LIST OF RDS */}
+          {filteredReports.length === 0 ? (
+            <div className="bg-slate-900 border border-slate-850 rounded-xl p-12 text-center" id="empty-search-state-records">
+              <FileCheck2 className="h-12 w-12 text-slate-650 mx-auto mb-3" />
+              <h4 className="text-base font-bold text-slate-300">Nenhum RDS localizado para os filtros informados</h4>
+              <p className="text-xs text-slate-500 mt-1 max-w-sm mx-auto">
+                Experimente limpar os filtros de datas, comandante ou meses para visualizar o acervo completo.
+              </p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4" id="reports-grid-list-view">
+              {filteredReports.map((report) => {
+                const reportCidade = report.cidade || 'Cuiabá';
+                const reportComandante = report.comandante_responsavel || 'Cmdte Geral';
+
+                return (
+                  <div
+                    key={report.id}
+                    onClick={() => setSelectedReport(report)}
+                    className="bg-slate-900 border border-slate-850 hover:border-slate-700/80 rounded-xl p-5 shadow-md flex flex-col justify-between cursor-pointer transition-all hover:translate-y-[-2px] hover:shadow-lg group"
+                  >
+                    <div>
+                      {/* Operation Header */}
+                      <div className="flex justify-between items-start gap-2 mb-3">
+                        <div>
+                          <div className="flex gap-1.5 flex-wrap mb-1">
+                            <span className="inline-flex items-center gap-1 text-[10px] text-amber-450 bg-amber-950/40 border border-amber-900/60 rounded px-2 py-0.5 font-mono uppercase font-semibold">
+                              {report.turno.split(' (')[0]}
+                            </span>
+                            
+                            <span className="inline-flex items-center gap-0.5 text-[10px] text-blue-400 bg-blue-950/40 border border-blue-900/60 rounded px-2 py-0.5 font-mono uppercase font-semibold">
+                              <MapPin className="h-2.5 w-2.5 inline" />
+                              {reportCidade}
+                            </span>
+                          </div>
+                          <h4 className="text-sm font-bold text-slate-100 group-hover:text-amber-400 transition mb-0.5 line-clamp-1">
+                            {report.operacao}
+                          </h4>
+                        </div>
+                        {/* View Details Button icon */}
+                        <span className="p-1.5 bg-slate-950 border border-slate-800 text-slate-400 rounded-lg group-hover:bg-blue-950 group-hover:border-blue-950 group-hover:text-blue-400 transition duration-150">
+                          <ChevronRight className="h-4 w-4" />
+                        </span>
+                      </div>
+
+                      {/* Summary/Narrative snippet */}
+                      <p className="text-xs text-slate-400 line-clamp-3 leading-relaxed mb-4 font-normal">
+                        {report.ocorrencias}
+                      </p>
+                    </div>
+
+                    {/* Footer specs / Seized quick stats */}
+                    <div className="border-t border-slate-800/80 pt-3 mt-1 flex flex-col gap-2">
+                      <div className="flex flex-wrap items-center justify-between text-[11px] text-slate-500 font-mono">
+                        <span className="flex items-center gap-1 truncate max-w-[200px]">
+                          <Users className="h-3 w-3 text-slate-600 shrink-0" />
+                          <span className="truncate">Cmdte: {reportComandante}</span>
+                        </span>
+                        <span className="flex items-center gap-1 shrink-0">
+                          <Clock className="h-3 w-3 text-slate-600" />
+                          {formatDateString(report.created_at)}
+                        </span>
+                      </div>
+
+                      {/* Badges of apprehensions */}
+                      <div className="flex flex-wrap gap-1.5 pt-1">
+                        <span className="text-[10px] bg-slate-950 border border-slate-800/80 rounded px-1.5 py-0.5 text-slate-400 font-mono">
+                          EFETIVO: <strong className="text-slate-200">{report.efetivo} PMs</strong>
+                        </span>
+                        <span className="text-[10px] bg-slate-950 border border-slate-800/80 rounded px-1.5 py-0.5 text-slate-400 font-mono">
+                          VTRS: <strong className="text-slate-200">{report.viaturas}</strong>
+                        </span>
+                        
+                        {report.armas_apreendidas > 0 && (
+                          <span className="text-[10px] bg-red-950/40 border border-red-900/60 text-red-450 rounded px-1.5 py-0.5 font-mono font-bold">
+                            ARMAS: {report.armas_apreendidas}
+                          </span>
+                        )}
+
+                        {report.municoes > 0 && (
+                          <span className="text-[10px] bg-amber-950/30 border border-amber-900/40 text-amber-300 rounded px-1.5 py-0.5 font-mono font-bold">
+                            MUN: {report.municoes}
+                          </span>
+                        )}
+
+                        {report.drogas_peso > 0 && (
+                          <span className="text-[10px] bg-blue-950/40 border border-blue-900/50 text-blue-400 rounded px-1.5 py-0.5 font-mono font-bold">
+                            DROGAS: {report.drogas_peso}g
+                          </span>
+                        )}
+
+                        {report.valores > 0 && (
+                          <span className="text-[10px] bg-emerald-950/40 border border-emerald-900/50 text-emerald-400 rounded px-1.5 py-0.5 font-mono font-bold">
+                            VAL: R$ {report.valores}
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Operational actions */}
+                      <div className="flex justify-end gap-2 pt-2 border-t border-slate-800/40 mt-1">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSelectedReport(report);
+                          }}
+                          className="text-xs font-mono font-semibold text-blue-400 hover:text-blue-300 transition-colors flex items-center gap-1 bg-slate-950 border border-slate-800/80 px-2.5 py-1.5 rounded"
+                        >
+                          <Eye className="h-3.5 w-3.5" />
+                          Visualizar RDS
+                        </button>
+
+                        {(currentUserEmail === report.user_email || report.id.startsWith('report-local-')) && (
+                          <button
+                            type="button"
+                            disabled={deletingId === report.id}
+                            onClick={(e) => handleDeleteClick(e, report.id)}
+                            className="text-xs font-mono font-semibold text-red-400 hover:text-red-300 transition-colors flex items-center gap-1 bg-slate-950 border border-slate-800/80 px-2.5 py-1.5 rounded hover:bg-red-950/20"
+                          >
+                            <Trash2 className="h-3 w-3" />
+                            Excluir
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 
       {/* DETAILED OFFICIAL MILITARY REPORT MODAL */}
       {selectedReport && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 flex items-center justify-center p-4 overflow-y-auto animate-fadeIn" id="document-modal-overlay">
-          <div className="w-full max-w-3xl bg-slate-900 border border-slate-800 rounded-xl shadow-2xl relative my-8" id="document-modal-card">
+        <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-md z-50 flex items-center justify-center p-4 overflow-y-auto animate-fadeIn" id="document-modal-overlay">
+          <div className="w-full max-w-4xl bg-slate-900 border border-slate-800 rounded-xl shadow-2xl relative my-8" id="document-modal-card">
             
             {/* Header Toolbar */}
-            <div className="p-4 bg-slate-950/80 border-b border-slate-800 flex justify-between items-center gap-4 sticky top-0 rounded-t-xl z-20">
+            <div className="p-4 bg-slate-950/90 border-b border-slate-800 flex justify-between items-center gap-4 sticky top-0 rounded-t-xl z-20">
               <span className="text-xs font-semibold font-mono text-slate-300 uppercase tracking-widest flex items-center gap-2">
-                <FileCheck2 className="h-4 w-4 text-amber-400" />
-                <span>Modo de Visualização Militar Oficial</span>
+                <FileCheck2 className="h-4 w-4 text-amber-500" />
+                <span>PMMT • Banco Oficial RDS-PM</span>
               </span>
 
               <div className="flex gap-2">
@@ -387,12 +991,12 @@ export default function ReportList({ reports, onDelete, currentUserEmail }: Repo
                   className="bg-blue-800 hover:bg-blue-700 text-white font-semibold text-xs px-3 py-1.5 rounded flex items-center gap-1.5 transition cursor-pointer"
                 >
                   <Printer className="h-3.5 w-3.5" />
-                  <span>Imprimir / PDF</span>
+                  <span>Imprimir / Salvar PDF</span>
                 </button>
                 <button
                   type="button"
                   onClick={() => setSelectedReport(null)}
-                  className="p-1.5 bg-slate-850 text-slate-400 hover:text-slate-205 rounded hover:bg-slate-800 transition"
+                  className="p-1.5 bg-slate-850 text-slate-400 hover:text-slate-200 rounded hover:bg-slate-800 transition"
                 >
                   <X className="h-4 w-4" />
                 </button>
@@ -400,9 +1004,9 @@ export default function ReportList({ reports, onDelete, currentUserEmail }: Repo
             </div>
 
             {/* PRINT AREA / OFFICIAL MARGINS */}
-            <div className="p-8 md:p-12 text-slate-900 bg-white" id="printable-report-paper">
+            <div className="p-8 md:p-12 text-slate-900 bg-white leading-relaxed" id="printable-report-paper">
               {/* Brazil/MT State Crest Placeholder & Official Heading */}
-              <div className="text-center border-b-2 border-double border-slate-800 pb-6 mb-6">
+              <div className="text-center border-b-2 border-double border-slate-800 pb-5 mb-5">
                 <div className="text-xs font-bold uppercase tracking-widest text-slate-900">
                   ESTADO DE MATO GROSSO
                 </div>
@@ -412,137 +1016,296 @@ export default function ReportList({ reports, onDelete, currentUserEmail }: Repo
                 <div className="text-sm font-bold uppercase tracking-widest text-slate-950 mt-1">
                   POLÍCIA MILITAR DE MATO GROSSO
                 </div>
-                <div className="text-[10px] font-mono font-medium text-slate-600 mt-0.5">
-                  DIRETORIA DE METROPOLITANA / SEÇÃO DE OPERAÇÕES • RDS-PM
+                <div className="text-[10px] font-mono font-medium text-slate-650 mt-0.5">
+                  SEÇÃO DE OPERAÇÕES E PLANEJAMENTO • DIRETORIA OPERACIONAL
                 </div>
 
-                <h2 className="text-lg font-black tracking-wider text-slate-950 uppercase mt-4 border border-slate-800 inline-block px-4 py-1">
-                  RELATÓRIO DIÁRIO DE SERVIÇO GERAL (RDS)
+                <h2 className="text-[15px] font-black tracking-wider text-slate-950 uppercase mt-4 border-2 border-slate-900 inline-block px-5 py-1.5">
+                  RELATÓRIO DIÁRIO DE SERVIÇO COMPLETO (RDS-PM)
                 </h2>
-                <div className="text-[11px] font-mono text-slate-600 mt-2">
-                  Nº Sequencial do Sistema: <strong className="text-slate-900">{selectedReport.id}</strong>
+                <div className="text-[10px] font-mono text-slate-600 mt-2">
+                  ID de Auditoria Eletrônica: <strong className="text-slate-950">{selectedReport.id}</strong>
                 </div>
               </div>
 
-              {/* Grid 1: Identificação */}
-              <div className="mb-6">
-                <h3 className="text-xs font-black font-mono tracking-wider uppercase text-slate-900 border-b border-slate-400 pb-1 mb-2.5">
-                  1. IDENTIFICAÇÃO E RECURSOS EMPREGADOS
+              {/* SECTION 1: Identificação */}
+              <div className="mb-5">
+                <h3 className="text-xs font-black font-mono tracking-wider uppercase text-slate-950 border-b-2 border-slate-350 pb-1 mb-2.5">
+                  1. IDENTIFICAÇÃO OPERACIONAL E RECURSOS HUMANOS
                 </h3>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-xs font-sans">
-                  <div className="border border-slate-200 p-2.5 bg-slate-50">
-                    <span className="block text-[10px] font-mono text-slate-500 uppercase font-bold">OPERACAO</span>
-                    <span className="font-bold text-slate-900">{selectedReport.operacao}</span>
+                
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 text-xs font-sans">
+                  <div className="border border-slate-300 p-2 bg-slate-50/70">
+                    <span className="block text-[9px] font-mono text-slate-500 uppercase font-bold">Operação Policial</span>
+                    <strong className="text-slate-900">{selectedReport.operacao}</strong>
                   </div>
-                  <div className="border border-slate-200 p-2.5 bg-slate-50">
-                    <span className="block text-[10px] font-mono text-slate-500 uppercase font-bold">ESCALA / TURNO</span>
-                    <span className="font-bold text-slate-900">{selectedReport.turno}</span>
+                  <div className="border border-slate-300 p-2 bg-slate-50/70">
+                    <span className="block text-[9px] font-mono text-slate-500 uppercase font-bold">Comandante Responsável</span>
+                    <strong className="text-slate-900">{selectedReport.comandante_responsavel || 'Cmdte Geral PM'}</strong>
                   </div>
-                  <div className="border border-slate-200 p-2.5 bg-slate-50">
-                    <span className="block text-[10px] font-mono text-slate-500 uppercase font-bold">CONFECÇÃO</span>
-                    <span className="font-bold text-slate-900">{formatDateString(selectedReport.created_at)}</span>
+                  <div className="border border-slate-300 p-2 bg-slate-50/70">
+                    <span className="block text-[9px] font-mono text-slate-500 uppercase font-bold">Cidade de Atuação</span>
+                    <strong className="text-slate-900">{selectedReport.cidade || 'Cuiabá'}</strong>
                   </div>
-                  <div className="border border-slate-200 p-2.5 bg-slate-50">
-                    <span className="block text-[10px] font-mono text-slate-500 uppercase font-bold">DIGITALIZADOR</span>
-                    <span className="font-bold text-slate-900 truncate block">{selectedReport.user_email || 'Seção Admin'}</span>
+                  <div className="border border-slate-300 p-2 bg-slate-50/70">
+                    <span className="block text-[9px] font-mono text-slate-500 uppercase font-bold">Turno / Escala</span>
+                    <strong className="text-slate-900">{selectedReport.turno}</strong>
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-xs font-sans mt-3">
-                  <div className="border border-slate-200 p-2.5 bg-slate-50">
-                    <span className="block text-[10px] font-mono text-slate-500 uppercase font-bold">POLICIAIS (EFETIVO)</span>
-                    <span className="font-bold text-slate-900">{selectedReport.efetivo} militares</span>
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 text-xs font-sans mt-2">
+                  <div className="border border-slate-300 p-2 bg-slate-50/70">
+                    <span className="block text-[9px] font-mono text-slate-500 uppercase font-bold">Horário de Serviço</span>
+                    <strong className="text-slate-900">{selectedReport.horario_servico || 'Não informado'}</strong>
                   </div>
-                  <div className="border border-slate-200 p-2.5 bg-slate-50">
-                    <span className="block text-[10px] font-mono text-slate-500 uppercase font-bold">VIATURAS (VTR)</span>
-                    <span className="font-bold text-slate-900">{selectedReport.viaturas} empenhadas</span>
+                  <div className="border border-slate-300 p-2 bg-slate-50/70">
+                    <span className="block text-[9px] font-mono text-slate-500 uppercase font-bold">Efetivo de Policiais</span>
+                    <strong className="text-slate-900">{selectedReport.efetivo} Militares</strong>
                   </div>
-                  <div className="border border-slate-200 p-2.5 bg-slate-50">
-                    <span className="block text-[10px] font-mono text-slate-500 uppercase font-bold">ORGÃO CENTRAL</span>
-                    <span className="font-bold text-slate-900">MT - Brasil</span>
+                  <div className="border border-slate-300 p-2 bg-slate-50/70">
+                    <span className="block text-[9px] font-mono text-slate-500 uppercase font-bold">Data de Confecção</span>
+                    <strong className="text-slate-900">{formatDateString(selectedReport.created_at)}</strong>
                   </div>
-                  <div className="border border-slate-200 p-2.5 bg-slate-50">
-                    <span className="block text-[10px] font-mono text-slate-500 uppercase font-bold">STATUS</span>
-                    <span className="font-bold text-emerald-700">✓ HOMOLOGADO</span>
+                  <div className="border border-slate-300 p-2 bg-slate-50/70">
+                    <span className="block text-[9px] font-mono text-slate-500 uppercase font-bold">Cadastrado por</span>
+                    <strong className="text-slate-900 truncate block">{selectedReport.user_email || 'Seção Adm'}</strong>
                   </div>
                 </div>
               </div>
 
-              {/* Grid 2: Produtividade */}
-              <div className="mb-6">
-                <h3 className="text-xs font-black font-mono tracking-wider uppercase text-slate-900 border-b border-slate-400 pb-1 mb-2.5">
-                  2. QUADRO RESUMO DE PRODUTIVIDADE OPERACIONAL
+              {/* SECTION 2: Viaturas Empenhadas */}
+              <div className="mb-5">
+                <h3 className="text-xs font-black font-mono tracking-wider uppercase text-slate-950 border-b-2 border-slate-350 pb-1 mb-2.5">
+                  2. VIATURAS EMPENHADAS E CONTROLE DE QUILOMETRAGEM
                 </h3>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-center text-xs font-sans">
-                  <div className="border border-slate-300 p-2">
-                    <span className="block text-[9px] font-mono text-slate-500 font-bold uppercase">ARMAS</span>
-                    <span className="text-base font-black text-slate-900">{selectedReport.armas_apreendidas}</span>
+                
+                {(!selectedReport.lista_viaturas || selectedReport.lista_viaturas.length === 0) ? (
+                  <p className="text-xs text-slate-600 italic font-mono border border-slate-200 p-2.5">
+                    Nenhuma viatura individual estruturada foi vinculada neste documento. Totalizador do cabeçalho indica {selectedReport.viaturas} VTR(s) em serviço.
+                  </p>
+                ) : (
+                  <div className="border border-slate-300 rounded-md overflow-hidden">
+                    <table className="w-full text-left text-xs border-collapse">
+                      <thead>
+                        <tr className="bg-slate-100 border-b border-slate-300 text-slate-750 font-mono text-[10px] font-black uppercase">
+                          <th className="p-2">Prefixo</th>
+                          <th className="p-2">Modelo do Veículo</th>
+                          <th className="p-2">Placa Oficial</th>
+                          <th className="p-2 text-center">KM Inicial</th>
+                          <th className="p-2 text-center">KM Final</th>
+                          <th className="p-2 text-center">KM Percorridos</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-250 font-mono text-slate-900">
+                        {selectedReport.lista_viaturas.map((vtr, i) => {
+                          const kmDiff = (vtr.km_final && vtr.km_inicial) ? (vtr.km_final - vtr.km_inicial) : null;
+                          return (
+                            <tr key={i} className="hover:bg-slate-50">
+                              <td className="p-2 font-bold">{vtr.prefixo}</td>
+                              <td className="p-2 text-slate-700">{vtr.modelo}</td>
+                              <td className="p-2">{vtr.placa || '-'}</td>
+                              <td className="p-2 text-center">{vtr.km_inicial ?? '-'}</td>
+                              <td className="p-2 text-center">{vtr.km_final ?? '-'}</td>
+                              <td className="p-2 text-center font-bold text-slate-950">
+                                {kmDiff !== null ? `${kmDiff} km` : '-'}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
                   </div>
-                  <div className="border border-slate-300 p-2">
-                    <span className="block text-[9px] font-mono text-slate-500 font-bold uppercase">MUNIÇÕES</span>
-                    <span className="text-base font-black text-slate-900">{selectedReport.municoes}</span>
+                )}
+              </div>
+
+              {/* SECTION 3: Ocorrências Detalhadas */}
+              <div className="mb-5">
+                <h3 className="text-xs font-black font-mono tracking-wider uppercase text-slate-950 border-b-2 border-slate-350 pb-1 mb-2.5">
+                  3. OCORRÊNCIAS ATENDIDAS E SUSPEITOS CONDUZIDOS
+                </h3>
+
+                {(!selectedReport.lista_ocorrencias || selectedReport.lista_ocorrencias.length === 0) ? (
+                  <p className="text-xs text-slate-605 italic font-mono border border-slate-200 p-2.5 bg-slate-50/20">
+                    Nenhuma ocorrência tabulada individualmente. Verifique o relato consolidado na seção 05.
+                  </p>
+                ) : (
+                  <div className="space-y-2">
+                    {selectedReport.lista_ocorrencias.map((oco, idx) => (
+                      <div key={idx} className="border border-slate-300 p-3 bg-slate-50/50 text-xs font-sans rounded">
+                        <div className="flex justify-between items-start flex-wrap gap-2 border-b border-slate-200 pb-1.5 mb-1.5">
+                          <div>
+                            <span className="font-bold text-slate-950 text-sm uppercase">{oco.natureza_ocorrencia}</span>
+                            {oco.ocorrencia_bo && (
+                              <span className="ml-2 bg-slate-200 border border-slate-300 text-[10px] font-mono text-slate-700 px-1.5 py-0.5 rounded">
+                                BO: {oco.ocorrencia_bo}
+                              </span>
+                            )}
+                          </div>
+                          {oco.suspeitos_conduzidos && oco.suspeitos_conduzidos > 0 ? (
+                            <span className="bg-red-100 border border-red-200 text-red-850 text-[10px] px-2 py-0.5 rounded font-black font-mono uppercase">
+                              Suspeitos Conduzidos: {oco.suspeitos_conduzidos}
+                            </span>
+                          ) : (
+                            <span className="text-[10px] font-mono text-slate-500">Sem conduzidos</span>
+                          )}
+                        </div>
+
+                        <p className="text-slate-800 text-xs leading-relaxed font-sans">{oco.observacoes}</p>
+                        
+                        {oco.local_fato && (
+                          <div className="text-[10px] text-slate-600 font-mono mt-1.5 flex items-center gap-1">
+                            <MapPin className="h-3 w-3 inline text-slate-500" />
+                            <span><strong>Endereço/Cidade:</strong> {oco.local_fato}</span>
+                          </div>
+                        )}
+                      </div>
+                    ))}
                   </div>
-                  <div className="border border-slate-300 p-2">
-                    <span className="block text-[9px] font-mono text-slate-500 font-bold uppercase">DROGAS (G)</span>
-                    <span className="text-base font-black text-slate-900">{selectedReport.drogas_peso}g</span>
+                )}
+              </div>
+
+              {/* SECTION 4: Resumo de Produtividade */}
+              <div className="mb-5">
+                <h3 className="text-xs font-black font-mono tracking-wider uppercase text-slate-950 border-b-2 border-slate-350 pb-1 mb-2.5">
+                  4. QUADRO DE PRODUTIVIDADE OPERACIONAL SINTÉTICO
+                </h3>
+                
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-center text-xs font-mono mb-3">
+                  <div className="border-2 border-slate-850 p-2.5 bg-slate-50">
+                    <span className="block text-[8px] text-slate-500 font-bold uppercase">ARMAS DE FOGO</span>
+                    <strong className="text-lg font-black text-slate-900">{selectedReport.armas_apreendidas}</strong>
                   </div>
-                  <div className="border border-slate-300 p-2">
-                    <span className="block text-[9px] font-mono text-slate-500 font-bold uppercase">VALOR RECURSIVO</span>
-                    <span className="text-base font-black text-emerald-800">{formatCurrency(selectedReport.valores)}</span>
+                  <div className="border-2 border-slate-850 p-2.5 bg-slate-50">
+                    <span className="block text-[8px] text-slate-500 font-bold uppercase">MUNIÇÃO APREENDIDA</span>
+                    <strong className="text-lg font-black text-slate-900">{selectedReport.municoes}</strong>
+                  </div>
+                  <div className="border-2 border-slate-850 p-2.5 bg-slate-50">
+                    <span className="block text-[8px] text-slate-500 font-bold uppercase">DROGAS APREENDIDAS</span>
+                    <strong className="text-lg font-black text-slate-900">{selectedReport.drogas_peso}g</strong>
+                  </div>
+                  <div className="border-2 border-slate-850 p-2.5 bg-slate-100">
+                    <span className="block text-[8px] text-slate-505 font-bold uppercase">VALOR RECONSTITUÍDO</span>
+                    <strong className="text-lg font-black text-emerald-800">{formatCurrency(selectedReport.valores)}</strong>
                   </div>
                 </div>
 
-                {/* Seized details block inside document */}
                 {(selectedReport.armas_apreendidas > 0 || selectedReport.municoes > 0 || selectedReport.drogas_peso > 0 || selectedReport.valores > 0) && (
-                  <div className="mt-3 border border-slate-200 p-4 bg-slate-50/50 text-xs font-sans space-y-2">
-                    <span className="block text-[10px] font-mono text-slate-600 font-black uppercase tracking-wider mb-1">DETALHAMENTO ASSOCIADO DAS APREENSÕES:</span>
+                  <div className="border border-slate-300 p-3 bg-slate-50/40 text-xs font-sans space-y-2">
+                    <span className="block text-[9px] font-mono text-slate-650 font-black tracking-wider uppercase border-b border-slate-200 pb-0.5">ESPECIFICAÇÕES DOS APREENDIDOS:</span>
                     {selectedReport.armas_apreendidas > 0 && (
-                      <div>• <strong>Armas: </strong>{selectedReport.armas_detalhes || 'Sem descrição cadastrada'}</div>
+                      <div>• <strong>Armas de Fogo apreendidas:</strong> {selectedReport.armas_detalhes || 'Sem detalhes discriminados no banco.'}</div>
                     )}
                     {selectedReport.municoes > 0 && (
-                      <div>• <strong>Munições: </strong>{selectedReport.municoes_detalhes || 'Sem descrição cadastrada'}</div>
+                      <div>• <strong>Munições apreendidas:</strong> {selectedReport.municoes_detalhes || 'Sem detalhes discriminados no banco.'}</div>
                     )}
                     {selectedReport.drogas_peso > 0 && (
-                      <div>• <strong>Drogas: </strong>{selectedReport.drogas_detalhes || 'Sem descrição de drogas'}</div>
+                      <div>• <strong>Entorpecentes apreendidos:</strong> {selectedReport.drogas_detalhes || 'Sem detalhes discriminados no banco.'}</div>
                     )}
                   </div>
                 )}
               </div>
 
-              {/* Grid 3: Histórico Narrativo */}
-              <div className="mb-10">
-                <h3 className="text-xs font-black font-mono tracking-wider uppercase text-slate-900 border-b border-slate-400 pb-1 mb-2.5">
-                  3. RELATÓRIO NARRATIVO OPERACIONAL / OCORRÊNCIAS
+              {/* SECTION 5: Relatório Consolidado */}
+              <div className="mb-5">
+                <h3 className="text-xs font-black font-mono tracking-wider uppercase text-slate-950 border-b-2 border-slate-350 pb-1 mb-2.5">
+                  5. NARRATIVA DIÁRIA GERAL DO SERVIÇO (CONSOLIDADO)
                 </h3>
-                <div className="border border-slate-300 p-4 bg-slate-50 text-xs text-slate-900 leading-relaxed font-sans min-h-[180px] whitespace-pre-wrap">
+                <div className="border border-slate-300 p-4 bg-slate-50 text-xs text-slate-900 leading-relaxed font-mono min-h-[140px] whitespace-pre-wrap">
                   {selectedReport.ocorrencias}
                 </div>
               </div>
 
-              {/* Signature lines */}
-              <div className="mt-12 pt-8 border-t border-dashed border-slate-300 grid grid-cols-1 md:grid-cols-2 gap-8 text-center text-xs font-mono">
+              {/* SECTION 6: Anexos operacionais vinculados */}
+              <div className="mb-10">
+                <h3 className="text-xs font-black font-mono tracking-wider uppercase text-slate-950 border-b-2 border-slate-350 pb-1 mb-2.5">
+                  6. ANEXOS OPERACIONAIS E LAUDOS REGISTRADOS
+                </h3>
+                {(!selectedReport.lista_anexos || selectedReport.lista_anexos.length === 0) ? (
+                  <p className="text-xs text-slate-550 italic font-mono border border-slate-200 p-2">Sem anexos de termos cadastrados eletronicamente.</p>
+                ) : (
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs font-mono">
+                    {selectedReport.lista_anexos.map((an, i) => (
+                      <div key={i} className="border border-slate-300 p-2 bg-slate-55 rounded flex items-center gap-2">
+                        <Paperclip className="h-3.5 w-3.5 text-blue-800 shrink-0" />
+                        <div className="min-w-0 flex-1">
+                          <span className="block font-bold text-slate-900 truncate">{an.nome_arquivo}</span>
+                          <span className="block text-[8px] text-slate-500 uppercase">{an.tipo} registrado</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Administrative observations */}
+                {selectedReport.observacoes && (
+                  <div className="mt-4 border-l-4 border-slate-400 pl-3 py-1 text-xs text-slate-700 italic">
+                    <strong>Informações adicionais do Comando:</strong> {selectedReport.observacoes}
+                  </div>
+                )}
+              </div>
+
+              {/* Signature area */}
+              <div className="mt-14 pt-8 border-t border-dashed border-slate-300 grid grid-cols-1 md:grid-cols-2 gap-8 text-center text-xs font-mono">
                 <div className="space-y-1">
                   <div className="w-48 border-b border-slate-400 mx-auto mt-6" />
-                  <span className="block font-bold text-slate-900">{selectedReport.user_email || 'POLICIAL MILITAR CONFECTOR'}</span>
-                  <span className="block text-[10px] text-slate-650">Comandante de Guarnição / Responsável de Turno</span>
+                  <span className="block font-bold text-slate-900 uppercase">
+                    {selectedReport.comandante_responsavel || 'Cmdte do Policiamento'}
+                  </span>
+                  <span className="block text-[9px] text-slate-600">Comandante de Serviço Geral / Responsável</span>
                 </div>
                 <div className="space-y-1">
                   <div className="w-48 border-b border-slate-400 mx-auto mt-6" />
-                  <span className="block font-bold text-slate-900">SEÇÃO DE ARQUIVO OPERACIONAL</span>
-                  <span className="block text-[10px] text-slate-650">Homologado Eletronicamente via RDS-PM</span>
+                  <span className="block font-bold text-slate-900 font-sans">DIRETORIA METROPOLITANA • PMMT</span>
+                  <span className="block text-[9px] text-slate-600 font-sans">Chancelado Eletronicamente via Banco Supabase</span>
                 </div>
               </div>
             </div>
 
             {/* Print Footer Notice */}
             <div className="p-4 bg-slate-950 border-t border-slate-800 text-center rounded-b-xl z-25">
-              <span className="text-[10px] font-mono text-slate-550 leading-relaxed">
-                Este documento é de uso restritivo policial e foi lavrado em acordo com o Código de Processo Penal e normas administrativas da Seção de TI & Estatística da PMMT.
+              <span className="text-[10px] font-mono text-slate-500 leading-relaxed block font-sans">
+                ATENÇÃO: Este documento contém informações operacionais confidenciais de nível corporativo da SESP/MT e PMMT.
               </span>
             </div>
           </div>
         </div>
       )}
+
+      {/* PRINT STYLING INJECTED VIA RAW CSS ELEMENT */}
+      <style>{`
+        @media print {
+          /* Hide everything except printable report section */
+          body * {
+            visibility: hidden !important;
+          }
+          #printable-report-paper, #printable-report-paper * {
+            visibility: visible !important;
+          }
+          #printable-report-paper {
+            position: absolute !important;
+            left: 0 !important;
+            top: 0 !important;
+            width: 100% !important;
+            padding: 0 !important;
+            margin: 0 !important;
+            background: white !important;
+            color: black !important;
+            font-size: 11px !important;
+          }
+          #document-modal-overlay {
+            background: white !important;
+            position: absolute !important;
+          }
+          #document-modal-card {
+            border: none !important;
+            box-shadow: none !important;
+            background: white !important;
+            max-width: 100% !important;
+            position: static !important;
+          }
+        }
+      `}</style>
+
     </div>
   );
 }

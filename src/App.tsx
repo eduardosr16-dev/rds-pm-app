@@ -122,7 +122,7 @@ export default function App() {
       // Supabase fetch flow
       try {
         const { data, error } = await supabase!
-          .from('relatorios_policiais')
+          .from('relatorios')
           .select('*')
           .order('created_at', { ascending: false });
 
@@ -165,11 +165,27 @@ export default function App() {
       // Supabase database insertion
       try {
         const { data, error } = await supabase!
-          .from('relatorios_policiais')
+          .from('relatorios')
           .insert([
             {
-              ...payload,
-              user_id: user.id
+              operacao: payload.operacao,
+              turno: payload.turno,
+              horario_servico: payload.horario_servico,
+              cidade: payload.cidade,
+              comandante_responsavel: payload.comandante_responsavel,
+              efetivo: payload.efetivo,
+              viaturas: payload.viaturas,
+              armas_apreendidas: payload.armas_apreendidas,
+              armas_detalhes: payload.armas_detalhes,
+              municoes: payload.municoes,
+              municoes_detalhes: payload.municoes_detalhes,
+              drogas_peso: payload.drogas_peso,
+              drogas_detalhes: payload.drogas_detalhes,
+              valores: payload.valores,
+              observacoes: payload.observacoes,
+              ocorrencias: payload.ocorrencias,
+              user_id: user.id,
+              user_email: user.email
             }
           ])
           .select();
@@ -202,7 +218,7 @@ export default function App() {
       // Supabase deletion
       try {
         const { error } = await supabase!
-          .from('relatorios_policiais')
+          .from('relatorios')
           .delete()
           .eq('id', id);
 
@@ -446,7 +462,7 @@ export default function App() {
           <div className="max-w-4xl mx-auto animate-fadeIn">
             <ReportForm 
               onSubmit={handleSaveReport} 
-              currentUserEmail={user.email} 
+              currentUserSession={user} 
             />
           </div>
         )}
@@ -478,6 +494,7 @@ export default function App() {
               reports={reports} 
               onDelete={handleDeleteReport} 
               currentUserEmail={user.email}
+              onNavigateToForm={() => setCurrentTab('form')}
             />
           </div>
         )}
