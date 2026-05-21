@@ -264,6 +264,24 @@ CREATE POLICY "Acesso para anexos" ON public.anexos FOR SELECT USING (true);
 CREATE POLICY "Escrita para anexos" ON public.anexos FOR INSERT WITH CHECK (true);
 CREATE POLICY "Edição para anexos" ON public.anexos FOR UPDATE USING (true);
 CREATE POLICY "Exclusão para anexos" ON public.anexos FOR DELETE USING (true);
+
+
+-- 10. TABELA DE USUARIOS PM (AUTENTICAÇÃO CUSTOMIZADA INSTITUCIONAL)
+CREATE TABLE IF NOT EXISTS public.usuarios_pm (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  rg_pm VARCHAR(50) UNIQUE NOT NULL,
+  nome VARCHAR(255) NOT NULL,
+  graduacao VARCHAR(50) NOT NULL,
+  senha_operacional VARCHAR(100) NOT NULL,
+  ativo BOOLEAN NOT NULL DEFAULT true,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+ALTER TABLE public.usuarios_pm ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Acesso livre select usuarios_pm" ON public.usuarios_pm FOR SELECT USING (true);
+CREATE POLICY "Acesso livre insert usuarios_pm" ON public.usuarios_pm FOR INSERT WITH CHECK (true);
+CREATE POLICY "Acesso livre update usuarios_pm" ON public.usuarios_pm FOR UPDATE USING (true);
+CREATE POLICY "Acesso livre delete usuarios_pm" ON public.usuarios_pm FOR DELETE USING (true);
 `;
 
 // Real relational fetching from Supabase database
