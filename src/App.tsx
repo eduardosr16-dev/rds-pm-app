@@ -5,7 +5,7 @@
 
 import { useState, useEffect } from 'react';
 import { PoliceReport, UserSession } from './types';
-import { supabase, isSupabaseConfigured, LocalDb } from './supabase';
+import { supabase, isSupabaseConfigured, LocalDb, fetchFullReports, saveFullReport } from './supabase';
 import LoginScreen from './components/LoginScreen';
 import ReportForm from './components/ReportForm';
 import ReportList from './components/ReportList';
@@ -121,13 +121,8 @@ export default function App() {
     } else {
       // Supabase fetch flow
       try {
-        const { data, error } = await supabase!
-          .from('relatorios')
-          .select('*')
-          .order('created_at', { ascending: false });
-
-        if (error) throw error;
-        setReports(data || []);
+        const fullReports = await fetchFullReports();
+        setReports(fullReports);
       } catch (err) {
         console.error('Falha de sincronização Supabase, usando banco local:', err);
         setReports(LocalDb.getReports());
@@ -164,43 +159,11 @@ export default function App() {
     } else {
       // Supabase database insertion
       try {
-        const { data, error } = await supabase!
-          .from('relatorios')
-          .insert([
-            {
-              operacao: payload.operacao,
-              turno: payload.turno,
-              horario_servico: payload.horario_servico,
-              cidade: payload.cidade,
-              comandante_responsavel: payload.comandante_responsavel,
-              efetivo: payload.efetivo,
-              viaturas: payload.viaturas,
-              armas_apreendidas: payload.armas_apreendidas,
-              armas_detalhes: payload.armas_detalhes,
-              municoes: payload.municoes,
-              municoes_detalhes: payload.municoes_detalhes,
-              drogas_peso: payload.drogas_peso,
-              drogas_detalhes: payload.drogas_detalhes,
-              valores: payload.valores,
-              observacoes: payload.observacoes,
-              ocorrencias: payload.ocorrencias,
-              user_id: user.id,
-              user_email: user.email
-            }
-          ])
-          .select();
-
-        if (error) throw error;
-
-        // Prepend to local state array
-        if (data && data[0]) {
-          setReports((prev) => [data[0], ...prev]);
-        } else {
-          await loadReports(user);
-        }
+        const fullReport = await saveFullReport(payload, user.id, user.email);
+        setReports((prev) => [fullReport, ...prev]);
         return true;
       } catch (err) {
-        console.error('Falha ao cadastrar relatório no Supabase:', err);
+        console.error('Falha ao cadastrar relatório relacional no Supabase:', err);
         return false;
       }
     }
@@ -248,17 +211,21 @@ export default function App() {
             
             {/* Left side brand */}
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg bg-gradient-to-tr from-blue-900 to-blue-800 border border-amber-400 p-1.5 flex items-center justify-center shrink-0 shadow-md shadow-blue-955/20">
-                <svg viewBox="0 0 100 100" className="w-full h-full text-amber-400 fill-current">
-                  <polygon points="50,10 62,38 91,38 67,56 76,85 50,67 24,85 33,56 9,38 38,38" />
-                </svg>
+              <div className="w-11 h-11 flex items-center justify-center shrink-0 relative">
+                <div className="absolute inset-0 bg-amber-500/5 rounded-full blur-sm" />
+                <img 
+                  src="https://upload.wikimedia.org/wikipedia/commons/e/ea/Bras%C3%A3o_da_PMMT.svg" 
+                  alt="Brasão PMMT" 
+                  className="relative w-10 h-10 object-contain drop-shadow-[0_0_5px_rgba(245,158,11,0.35)]"
+                  referrerPolicy="no-referrer"
+                />
               </div>
               <div>
                 <div className="flex items-center gap-1.5">
                   <span className="font-extrabold text-base tracking-tight text-white font-sans uppercase">RDS-PM</span>
                   <span className="hidden sm:inline-block text-[10px] uppercase font-mono px-1.5 py-0.5 bg-blue-950 border border-blue-900 text-blue-400 rounded">PMMT</span>
                 </div>
-                <p className="text-[10px] text-slate-400 tracking-wider font-mono">Governo de Mato Grosso</p>
+                <p className="text-[10px] text-slate-400 tracking-wider font-sans">Polícia Militar de Mato Grosso</p>
               </div>
             </div>
 
@@ -310,8 +277,8 @@ export default function App() {
                 <span className="block text-xs font-bold font-sans text-slate-200">
                   {user.name}
                 </span>
-                <span className="block text-[10px] font-mono text-slate-400">
-                  {user.email}
+                <span className="block text-[10px] font-mono text-amber-500 font-semibold uppercase">
+                  Policial Militar Conectado
                 </span>
               </div>
               
@@ -349,7 +316,7 @@ export default function App() {
               </div>
               <div>
                 <span className="block text-xs font-extrabold text-white">{user.name}</span>
-                <span className="block text-[10px] font-mono text-slate-450">{user.email}</span>
+                <span className="block text-[10px] font-mono text-emerald-400 font-semibold uppercase">PMMT Oficial</span>
               </div>
             </div>
 

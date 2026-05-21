@@ -32,15 +32,26 @@ export const isSupabaseConfigured = (): boolean => {
 };
 
 // Return the expanded SQL string to initialize the schema in Supabase Dashboard
-export const DB_SQL_SCHEMA = `-- ==========================================
+export const DB_SQL_SCHEMA = `-- =========================================================================
 -- SCRIPT DE ESTRUTURA PARA BANCO SUPABASE (RDS-PM)
--- POLÍCIA MILITAR DE MATO GROSSO (PMMT)
--- ==========================================
+-- POLÍCIA MILITAR DE MATO GROSSO (PMMT) - ESTRUTURA OPERACIONAL COMPLETA
+-- =========================================================================
 
--- 1. TABELA DE POLICIAIS
+-- DB CLEANUP (Se quiser recomeçar do zero, descomente abaixo)
+-- DROP TABLE IF EXISTS public.integrantes_guarnicao CASCADE;
+-- DROP TABLE IF EXISTS public.guarnicoes CASCADE;
+-- DROP TABLE IF EXISTS public.viaturas CASCADE;
+-- DROP TABLE IF EXISTS public.atividades_delegadas CASCADE;
+-- DROP TABLE IF EXISTS public.jornadas_extraordinarias CASCADE;
+-- DROP TABLE IF EXISTS public.ocorrencias CASCADE;
+-- DROP TABLE IF EXISTS public.anexos CASCADE;
+-- DROP TABLE IF EXISTS public.relatorios CASCADE;
+-- DROP TABLE IF EXISTS public.policiais CASCADE;
+
+-- 1. TABELA DE POLICIAIS (BANCO INTERNO DE EFETIVOS DA SEÇÃO)
 CREATE TABLE IF NOT EXISTS public.policiais (
-  id UUID PRIMARY KEY, -- ID correspondente ao auth.users.id
-  nome VARCHAR(255) NOT NULL,
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  nome_completo VARCHAR(255) NOT NULL,
   matricula VARCHAR(50) UNIQUE NOT NULL,
   graduacao VARCHAR(50) NOT NULL,
   pelotao VARCHAR(100),
@@ -51,17 +62,51 @@ CREATE TABLE IF NOT EXISTS public.policiais (
 -- Ativar Row Level Security (RLS)
 ALTER TABLE public.policiais ENABLE ROW LEVEL SECURITY;
 
--- 2. TABELA DE RELATÓRIOS (SUBSTITUI / SUPERA O MODELO SIMPLES ANTERIOR)
+-- Políticas de RLS para Policiais
+CREATE POLICY "Acesso livre geral para tabela policiais" ON public.policiais FOR SELECT USING (true);
+CREATE POLICY "Escrita livre geral para tabela policiais" ON public.policiais FOR INSERT WITH CHECK (true);
+CREATE POLICY "Edição de policiais" ON public.policiais FOR UPDATE USING (true);
+CREATE POLICY "Exclusão de policiais" ON public.policiais FOR DELETE USING (true);
+
+-- Cadastrar automaticamente os policiais oficiais da listagem PMMT
+INSERT INTO public.policiais (nome_completo, matricula, graduacao) VALUES
+('JEORGE AUGUSTO FERNANDES DE JESUS', '882.437', 'CAP PM'),
+('FRANCKCINEY CANAVARROS MAGALHÃES', '880.279', '2º TEN PM'),
+('WELLINGTON ALVES DA SILVA', '881.504', '2º TEN PM'),
+('JUSCELINO FERREIRA DA LUZ', '880.492', '1º SGT PM'),
+('EDUARDO SILVA RODRIGUES', '883.694', '2º SGT PM'),
+('ALLAN M. OLIVEIRA BOSAIPO', '885.109', '2º SGT PM'),
+('TIAGO RODRIGUES ALVES', '886.302', '2º SGT PM'),
+('DOUGLAS SOUZA PORTO', '887.198', '2º SGT PM'),
+('GLAUKO A. S. RODRIGUES DE LIMA', '884.122', '3º SGT PM'),
+('LEANDRO DE JESUS SOUZA', '885.136', '3º SGT PM'),
+('DIEGO A. DE SOUSA BOHRER', '885.117', '3º SGT PM'),
+('MATEUS FETTER', '885.982', 'CB PM'),
+('MARCELO DIAS BATISTA', '885.918', 'CB PM'),
+('RHANGEL NUNES RAMOS', '886.045', 'CB PM'),
+('KEVEN ALLEF FERREIRA DA COSTA', '886.245', 'CB PM'),
+('JOSEAN EVARISTO DA SILVA', '886.343', 'CB PM'),
+('RENAN FRANCISCO GOMES', '886.469', 'CB PM'),
+('ILDEONES SILVA DA LUZ', '886.451', 'CB PM'),
+('MARCOS SILVA OLIVEIRA', '886.462', 'CB PM'),
+('THIAGO MARTINS DA SILVA', '886.594', 'CB PM'),
+('VENILSON SOUZA MATOS', '887.688', 'CB PM'),
+('THIAGO FAUSTINO DE OLIVEIRA', '886.471', 'SD PM'),
+('FRANCISCO ANTONIO DA SILVA FILHO', '888.550', 'SD PM')
+ON CONFLICT (matricula) DO NOTHING;
+
+
+-- 2. TABELA DE RELATÓRIOS DIÁRIOS DE SERVIÇO (RELATORIOS)
 CREATE TABLE IF NOT EXISTS public.relatorios (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
-  user_id UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+  user_id UUID DEFAULT NULL,
   user_email VARCHAR(255),
   
   -- Identificação e Detalhes solicitados
   operacao VARCHAR(255) NOT NULL,
   turno VARCHAR(50) NOT NULL,
-  horario_servico VARCHAR(100) NOT NULL, -- Ex: "18h às 06h" ou "19:00 às 07:00"
+  horario_servico VARCHAR(100) NOT NULL, -- Ex: "18:00 às 06:00"
   cidade VARCHAR(100) NOT NULL DEFAULT 'Cuiabá',
   comandante_responsavel VARCHAR(255) NOT NULL,
   efetivo INTEGER NOT NULL DEFAULT 1,
@@ -84,10 +129,52 @@ CREATE TABLE IF NOT EXISTS public.relatorios (
 -- Ativar RLS para relatórios
 ALTER TABLE public.relatorios ENABLE ROW LEVEL SECURITY;
 
--- 3. TABELA DE VIATURAS (RELAÇÃO 1-N COM RELATÓRIOS)
+CREATE POLICY "Acesso livre geral para tabela relatorios" ON public.relatorios FOR SELECT USING (true);
+CREATE POLICY "Escrita livre geral para tabela relatorios" ON public.relatorios FOR INSERT WITH CHECK (true);
+CREATE POLICY "Edição livre geral para tabela relatorios" ON public.relatorios FOR UPDATE USING (true);
+CREATE POLICY "Exclusão livre geral para tabela relatorios" ON public.relatorios FOR DELETE USING (true);
+
+
+-- 3. TABELA DE GUARNIÇÕES (GUARNICOES) - Relacionado com Relatório (1-N)
+CREATE TABLE IF NOT EXISTS public.guarnicoes (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  relatorio_id UUID REFERENCES public.relatorios(id) ON DELETE CASCADE NOT NULL,
+  nome_guarnicao VARCHAR(150) NOT NULL,
+  tipo_guarnicao VARCHAR(100) NOT NULL,
+  viatura VARCHAR(100) NOT NULL,
+  comandante_guarnicao VARCHAR(255) NOT NULL,
+  policiais_integrantes TEXT NOT NULL, -- Lista descritiva dos integrantes
+  horario_inicial VARCHAR(50) NOT NULL,
+  horario_final VARCHAR(50) NOT NULL,
+  criado_em TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+ALTER TABLE public.guarnicoes ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Acesso para guarnicoes" ON public.guarnicoes FOR SELECT USING (true);
+CREATE POLICY "Escrita para guarnicoes" ON public.guarnicoes FOR INSERT WITH CHECK (true);
+CREATE POLICY "Edição para guarnicoes" ON public.guarnicoes FOR UPDATE USING (true);
+CREATE POLICY "Exclusão para guarnicoes" ON public.guarnicoes FOR DELETE USING (true);
+
+
+-- 4. TABELA DE INTEGRANTES DE GUARNIÇÃO (INTEGRANTES_GUARNICAO) - Relacionamento N-M entre Guarnição e Policiais
+CREATE TABLE IF NOT EXISTS public.integrantes_guarnicao (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  guarnicao_id UUID REFERENCES public.guarnicoes(id) ON DELETE CASCADE NOT NULL,
+  policial_matricula VARCHAR(50) REFERENCES public.policiais(matricula) ON DELETE CASCADE NOT NULL,
+  criado_em TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+ALTER TABLE public.integrantes_guarnicao ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Acesso para integrantes_guarnicao" ON public.integrantes_guarnicao FOR SELECT USING (true);
+CREATE POLICY "Escrita para integrantes_guarnicao" ON public.integrantes_guarnicao FOR INSERT WITH CHECK (true);
+CREATE POLICY "Edição para integrantes_guarnicao" ON public.integrantes_guarnicao FOR UPDATE USING (true);
+CREATE POLICY "Exclusão para integrantes_guarnicao" ON public.integrantes_guarnicao FOR DELETE USING (true);
+
+
+-- 5. TABELA DE VIATURAS (VIATURAS) - Relacionado com Relatório (1-N)
 CREATE TABLE IF NOT EXISTS public.viaturas (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-  relatorio_id UUID REFERENCES public.relatorios(id) ON DELETE CASCADE,
+  relatorio_id UUID REFERENCES public.relatorios(id) ON DELETE CASCADE NOT NULL,
   prefixo VARCHAR(50) NOT NULL, -- Ex: "VTR-1042"
   modelo VARCHAR(100) NOT NULL, -- Ex: "Toyota Hilux"
   placa VARCHAR(20),
@@ -96,14 +183,58 @@ CREATE TABLE IF NOT EXISTS public.viaturas (
   criado_em TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
--- Ativar RLS para viaturas
 ALTER TABLE public.viaturas ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Acesso para viaturas" ON public.viaturas FOR SELECT USING (true);
+CREATE POLICY "Escrita para viaturas" ON public.viaturas FOR INSERT WITH CHECK (true);
+CREATE POLICY "Edição para viaturas" ON public.viaturas FOR UPDATE USING (true);
+CREATE POLICY "Exclusão para viaturas" ON public.viaturas FOR DELETE USING (true);
 
--- 4. TABELA DE OCORRÊNCIAS DETALHADAS (RELAÇÃO 1-N COM RELATÓRIOS)
+
+-- 6. TABELA DE ATIVIDADES DELEGADAS (ATIVIDADES_DELEGADAS) - Relacionado com Relatório (1-N)
+CREATE TABLE IF NOT EXISTS public.atividades_delegadas (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  relatorio_id UUID REFERENCES public.relatorios(id) ON DELETE CASCADE NOT NULL,
+  nome_equipe VARCHAR(150) NOT NULL,
+  viatura VARCHAR(100) NOT NULL,
+  policiais TEXT NOT NULL,
+  local_operacao VARCHAR(255) NOT NULL,
+  horario VARCHAR(100) NOT NULL,
+  observacoes TEXT,
+  criado_em TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+ALTER TABLE public.atividades_delegadas ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Acesso para atividades_delegadas" ON public.atividades_delegadas FOR SELECT USING (true);
+CREATE POLICY "Escrita para atividades_delegadas" ON public.atividades_delegadas FOR INSERT WITH CHECK (true);
+CREATE POLICY "Edição para atividades_delegadas" ON public.atividades_delegadas FOR UPDATE USING (true);
+CREATE POLICY "Exclusão para atividades_delegadas" ON public.atividades_delegadas FOR DELETE USING (true);
+
+
+-- 7. TABELA DE JORNADAS EXTRAORDINÁRIAS (JORNADAS_EXTRAORDINARIAS) - Relacionado com Relatório (1-N)
+CREATE TABLE IF NOT EXISTS public.jornadas_extraordinarias (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  relatorio_id UUID REFERENCES public.relatorios(id) ON DELETE CASCADE NOT NULL,
+  nome_equipe VARCHAR(150) NOT NULL,
+  viatura VARCHAR(100) NOT NULL,
+  policiais TEXT NOT NULL,
+  tipo_reforco VARCHAR(150) NOT NULL,
+  horario VARCHAR(100) NOT NULL,
+  observacoes TEXT,
+  criado_em TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+ALTER TABLE public.jornadas_extraordinarias ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Acesso para jornadas_extraordinarias" ON public.jornadas_extraordinarias FOR SELECT USING (true);
+CREATE POLICY "Escrita para jornadas_extraordinarias" ON public.jornadas_extraordinarias FOR INSERT WITH CHECK (true);
+CREATE POLICY "Edição para jornadas_extraordinarias" ON public.jornadas_extraordinarias FOR UPDATE USING (true);
+CREATE POLICY "Exclusão para jornadas_extraordinarias" ON public.jornadas_extraordinarias FOR DELETE USING (true);
+
+
+-- 8. TABELA DE OCORRÊNCIAS DETALHADAS (OCORRENCIAS) - Relacionado com Relatório (1-N)
 CREATE TABLE IF NOT EXISTS public.ocorrencias (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-  relatorio_id UUID REFERENCES public.relatorios(id) ON DELETE CASCADE,
-  natureza_ocorrencia VARCHAR(150) NOT NULL, -- Ex: "Tráfico de Entorpecentes", "Roubo de Veículo"
+  relatorio_id UUID REFERENCES public.relatorios(id) ON DELETE CASCADE NOT NULL,
+  natureza_ocorrencia VARCHAR(150) NOT NULL,
   ocorrencia_bo VARCHAR(50), -- Número do BO
   suspeitos_conduzidos INTEGER DEFAULT 0,
   observacoes TEXT NOT NULL, -- Relato / Descritivo
@@ -111,195 +242,236 @@ CREATE TABLE IF NOT EXISTS public.ocorrencias (
   criado_em TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
--- Ativar RLS para ocorrencias
 ALTER TABLE public.ocorrencias ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Acesso para ocorrencias" ON public.ocorrencias FOR SELECT USING (true);
+CREATE POLICY "Escrita para ocorrencias" ON public.ocorrencias FOR INSERT WITH CHECK (true);
+CREATE POLICY "Edição para ocorrencias" ON public.ocorrencias FOR UPDATE USING (true);
+CREATE POLICY "Exclusão para ocorrencias" ON public.ocorrencias FOR DELETE USING (true);
 
--- 5. TABELA DE ANEXOS (RELAÇÃO 1-N COM RELATÓRIOS)
+
+-- 9. TABELA DE ANEXOS (ANEXOS) - Relacionado com Relatório (1-N)
 CREATE TABLE IF NOT EXISTS public.anexos (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-  relatorio_id UUID REFERENCES public.relatorios(id) ON DELETE CASCADE,
+  relatorio_id UUID REFERENCES public.relatorios(id) ON DELETE CASCADE NOT NULL,
   nome_arquivo VARCHAR(255) NOT NULL,
   url_arquivo TEXT NOT NULL, -- Link do Storage Supabase ou string base64 / foto
   tipo VARCHAR(50) DEFAULT 'imagem', -- 'imagem', 'pdf', 'outro'
   criado_em TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
--- Ativar RLS para anexos
 ALTER TABLE public.anexos ENABLE ROW LEVEL SECURITY;
-
-
--- ==========================================
--- POLICIES DE SEGURANÇA (ROW LEVEL SECURITY)
--- ==========================================
-
--- A) POLICIAIS
-CREATE POLICY "Leitura livre para militar autenticado" 
-  ON public.policiais FOR SELECT TO authenticated USING (true);
-
-CREATE POLICY "Gravação do próprio dados de militar" 
-  ON public.policiais FOR INSERT TO authenticated WITH CHECK (auth.uid() = id);
-
-CREATE POLICY "Atualização do próprio cadastro" 
-  ON public.policiais FOR UPDATE TO authenticated USING (auth.uid() = id);
-
--- B) RELATÓRIOS
-CREATE POLICY "Militar autenticado lê qualquer RDS" 
-  ON public.relatorios FOR SELECT TO authenticated USING (true);
-
-CREATE POLICY "Militar autenticado insere RDS" 
-  ON public.relatorios FOR INSERT TO authenticated WITH CHECK (true);
-
-CREATE POLICY "Militar criador atualiza o próprio RDS" 
-  ON public.relatorios FOR UPDATE TO authenticated USING (auth.uid() = user_id);
-
-CREATE POLICY "Militar criador deleta o próprio RDS" 
-  ON public.relatorios FOR DELETE TO authenticated USING (auth.uid() = user_id);
-
--- C) VIATURAS
-CREATE POLICY "Militar lê viaturas de RDS" 
-  ON public.viaturas FOR SELECT TO authenticated USING (true);
-
-CREATE POLICY "Militar insere viatura vinculada" 
-  ON public.viaturas FOR INSERT TO authenticated WITH CHECK (true);
-
-CREATE POLICY "Deleção de viaturas vinculadas" 
-  ON public.viaturas FOR DELETE TO authenticated USING (
-    EXISTS (
-      SELECT 1 FROM public.relatorios 
-      WHERE public.relatorios.id = public.viaturas.relatorio_id 
-      AND public.relatorios.user_id = auth.uid()
-    )
-  );
-
--- D) OCORRÊNCIAS
-CREATE POLICY "Militar lê ocorrências de RDS" 
-  ON public.ocorrencias FOR SELECT TO authenticated USING (true);
-
-CREATE POLICY "Militar insere ocorrência em RDS" 
-  ON public.ocorrencias FOR INSERT TO authenticated WITH CHECK (true);
-
-CREATE POLICY "Deleção de ocorrências vinculadas" 
-  ON public.ocorrencias FOR DELETE TO authenticated USING (
-    EXISTS (
-      SELECT 1 FROM public.relatorios 
-      WHERE public.relatorios.id = public.ocorrencias.relatorio_id 
-      AND public.relatorios.user_id = auth.uid()
-    )
-  );
-
--- E) ANEXOS
-CREATE POLICY "Militar lê anexos de RDS" 
-  ON public.anexos FOR SELECT TO authenticated USING (true);
-
-CREATE POLICY "Militar insere anexos em RDS" 
-  ON public.anexos FOR INSERT TO authenticated WITH CHECK (true);
-
-CREATE POLICY "Deleção de anexos vinculados" 
-  ON public.anexos FOR DELETE TO authenticated USING (
-    EXISTS (
-      SELECT 1 FROM public.relatorios 
-      WHERE public.relatorios.id = public.anexos.relatorio_id 
-      AND public.relatorios.user_id = auth.uid()
-    )
-  );
+CREATE POLICY "Acesso para anexos" ON public.anexos FOR SELECT USING (true);
+CREATE POLICY "Escrita para anexos" ON public.anexos FOR INSERT WITH CHECK (true);
+CREATE POLICY "Edição para anexos" ON public.anexos FOR UPDATE USING (true);
+CREATE POLICY "Exclusão para anexos" ON public.anexos FOR DELETE USING (true);
 `;
 
-// Initial mockup data to populate local storage of the app
-const initialLocalReports: PoliceReport[] = [
-  {
-    id: 'report-demo-1',
-    created_at: new Date(Date.now() - 3 * 3600000).toISOString(), // 3 hours ago
-    user_email: 'tenente.gomes@pm.mt.gov.br',
-    operacao: 'Operação Saturação Metropolitana',
-    turno: 'Serviço Noturno (18h às 06h)',
-    horario_servico: '19:00 às 07:00',
-    cidade: 'Cuiabá',
-    comandante_responsavel: 'Ten PM Gomes',
-    efetivo: 12,
-    viaturas: 4,
-    armas_apreendidas: 2,
-    armas_detalhes: '01 Revólver Taurus Cal. 38 com numeração raspada, 01 Pistola Imbel .40 S&W',
-    municoes: 18,
-    municoes_detalhes: '12 munições cal .38 intactas e 6 munições cal .40 intactas',
-    drogas_peso: 1250,
-    drogas_detalhes: 'Aproximadamente 950g de substância análoga à Maconha prensada e 300g de substância análoga à Cocaína em porções prontas para comercialização',
-    valores: 1450.0,
-    observacoes: 'Diligências efetuadas em conjunto com a Força Tática do 1º Comando Regional.',
-    ocorrencias: 'Durante patrulhamento tático no bairro CPA IV, Cuiabá-MT, a guarnição deparou-se com veículo VW Gol branco em atitude suspeita. Na abordagem, constatou-se que o chassi estava adulterado e debaixo dos bancos foram localizadas as armas mencionadas e frascos contendo entorpecentes. Três suspeitos receberam voz de prisão e foram conduzidos à Central de Flagrantes.',
-    lista_viaturas: [
-      { prefixo: 'VTR-1021', modelo: 'Toyota Hilux GLI', placa: 'OBO-2234', km_inicial: 124500, km_final: 124720 },
-      { prefixo: 'VTR-1025', modelo: 'Toyota Hilux GLI', placa: 'OBO-4412', km_inicial: 98110, km_final: 98320 }
-    ],
-    lista_ocorrencias: [
-      { natureza_ocorrencia: 'Tráfico de drogas', ocorrencia_bo: 'BO-2026.04415', suspeitos_conduzidos: 2, observacoes: 'Apreensão de grande volume de maconha e cocaína prensada no CPA IV.', local_fato: 'Bairro CPA IV, Cuiabá - MT' },
-      { natureza_ocorrencia: 'Porte ilegal de arma de fogo', ocorrencia_bo: 'BO-2026.04416', suspeitos_conduzidos: 1, observacoes: 'Pistola cal .40 localizada com o motorista do veículo abordado.', local_fato: 'Avenida Pantanal, Cuiabá - MT' }
-    ]
-  },
-  {
-    id: 'report-demo-2',
-    created_at: new Date(Date.now() - 12 * 3600000).toISOString(), // 12 hours ago
-    user_email: 'sargento.silva@pm.mt.gov.br',
-    operacao: 'Barreira Integrada de Trânsito',
-    turno: 'Serviço Vespertino (12h às 18h)',
-    horario_servico: '12:00 às 18:00',
-    cidade: 'Várzea Grande',
-    comandante_responsavel: '2º Sgt PM Silva',
-    efetivo: 8,
-    viaturas: 3,
-    armas_apreendidas: 0,
-    municoes: 0,
-    drogas_peso: 0,
-    valores: 0.0,
-    observacoes: 'Ação integrada realizada com apoio da Guarda Municipal de Várzea Grande.',
-    ocorrencias: 'Realização de fiscalização de trânsito na Rodovia Emanuel Pinheiro (MT-251). Total de 38 veículos automotores vistoriados. Foram expedidos 09 autos de infração de trânsito diversos (AITs) e recolhidos 02 veículos ao pátio credenciado do Detran por documentação vencida. Sem demais ocorrências graves registradas.',
-    lista_viaturas: [
-      { prefixo: 'VTR-0941', modelo: 'Chevrolet Trailblazer', placa: 'RRN-9F12', km_inicial: 45210, km_final: 45310 }
-    ],
-    lista_ocorrencias: [
-      { natureza_ocorrencia: 'Infração de trânsito / Apreensão de veículo', ocorrencia_bo: 'BO-2026.04351', suspeitos_conduzidos: 0, observacoes: 'Veículos recolhidos por ausência de licenciamento obrigatório vigente.', local_fato: 'MT-251 Km 4, Mato Grosso' }
-    ]
-  },
-  {
-    id: 'report-demo-3',
-    created_at: new Date(Date.now() - 36 * 3600000).toISOString(), // 1.5 days ago
-    user_email: 'cabo.souza@pm.mt.gov.br',
-    operacao: 'Operação Comércio Seguro',
-    turno: 'Serviço Matutino (06h às 12h)',
-    horario_servico: '06:00 às 12:00',
-    cidade: 'Rondonópolis',
-    comandante_responsavel: 'Cb PM Souza',
-    efetivo: 6,
-    viaturas: 2,
-    armas_apreendidas: 1,
-    armas_detalhes: '01 Garrucha Calibre .22 sem marca visível',
-    municoes: 4,
-    municoes_detalhes: '04 munições calibre .22 intactas',
-    drogas_peso: 45,
-    drogas_detalhes: '12 porções (trouxinhas) de substância de cheiro característico a Pasta Base de Cocaína',
-    valores: 280.0,
-    observacoes: 'Subsidiar patrulhas a pé no centro comercial.',
-    ocorrencias: 'Atendimento de ocorrência de furto em andamento em estabelecimento comercial no Centro de Rondonópolis-MT. Um indivíduo foi flagrado por lojistas saindo em posse de produtos sem pagar. Com a chegada da viatura, o suspeito foi detido e, na busca pessoal, foi encontrada uma garrucha calibre .22 em sua cintura e dinheiro em notas miúdas.',
-    lista_viaturas: [
-      { prefixo: 'VTR-1022', modelo: 'Renault Duster', placa: 'NUE-3382', km_inicial: 189100, km_final: 189180 }
-    ],
-    lista_ocorrencias: [
-      { natureza_ocorrencia: 'Furto tentado com detenção', ocorrencia_bo: 'BO-2026.04210', suspeitos_conduzidos: 1, observacoes: 'Suspeito detido em flagrante com mercadorias subtraídas e garrucha calibre .22.', local_fato: 'Av. Marechal Rondon, Centro, Rondonópolis - MT' }
-    ]
-  }
-];
+// Real relational fetching from Supabase database
+export const fetchFullReports = async (): Promise<PoliceReport[]> => {
+  if (!supabase) return [];
 
-// LocalDatabase helper object for full offline-persistence
+  // 1. Fetch main reports
+  const { data: rels, error: relsErr } = await supabase
+    .from('relatorios')
+    .select('*')
+    .order('created_at', { ascending: false });
+
+  if (relsErr) throw relsErr;
+  if (!rels || rels.length === 0) return [];
+
+  const relsIds = rels.map(r => r.id);
+
+  // 2. Fetch all child elements in parallel to bypass huge joins issues
+  const [
+    { data: vtrs },
+    { data: ocos },
+    { data: guars },
+    { data: delegs },
+    { data: jorns },
+    { data: anxs }
+  ] = await Promise.all([
+    supabase.from('viaturas').select('*').in('relatorio_id', relsIds),
+    supabase.from('ocorrencias').select('*').in('relatorio_id', relsIds),
+    supabase.from('guarnicoes').select('*').in('relatorio_id', relsIds),
+    supabase.from('atividades_delegadas').select('*').in('relatorio_id', relsIds),
+    supabase.from('jornadas_extraordinarias').select('*').in('relatorio_id', relsIds),
+    supabase.from('anexos').select('*').in('relatorio_id', relsIds)
+  ]);
+
+  // 3. Assemble components back into mapped TypeScript objects
+  return rels.map((r: any) => {
+    return {
+      ...r,
+      lista_viaturas: (vtrs || []).filter((v: any) => v.relatorio_id === r.id),
+      lista_ocorrencias: (ocos || []).filter((o: any) => o.relatorio_id === r.id),
+      lista_guarnicoes: (guars || []).filter((g: any) => g.relatorio_id === r.id),
+      lista_atividades_delegadas: (delegs || []).filter((d: any) => d.relatorio_id === r.id),
+      lista_jornadas_extraordinarias: (jorns || []).filter((j: any) => j.relatorio_id === r.id),
+      lista_anexos: (anxs || []).filter((a: any) => a.relatorio_id === r.id)
+    };
+  });
+};
+
+// Real transactional-like relational inserting in Supabase database
+export const saveFullReport = async (
+  payload: Omit<PoliceReport, 'id' | 'created_at'>,
+  userId?: string,
+  userEmail?: string
+): Promise<PoliceReport> => {
+  if (!supabase) throw new Error("Supabase is not configured yet.");
+
+  // 1. Insert main record first
+  const { data: relData, error: relError } = await supabase
+    .from('relatorios')
+    .insert([{
+      operacao: payload.operacao,
+      turno: payload.turno,
+      horario_servico: payload.horario_servico,
+      cidade: payload.cidade,
+      comandante_responsavel: payload.comandante_responsavel,
+      efetivo: payload.efetivo,
+      viaturas: payload.viaturas,
+      armas_apreendidas: payload.armas_apreendidas,
+      armas_detalhes: payload.armas_detalhes,
+      municoes: payload.municoes,
+      municoes_detalhes: payload.municoes_detalhes,
+      drogas_peso: payload.drogas_peso,
+      drogas_detalhes: payload.drogas_detalhes,
+      valores: payload.valores,
+      observacoes: payload.observacoes,
+      ocorrencias: payload.ocorrencias,
+      user_id: userId || null,
+      user_email: userEmail || 'Central RDS'
+    }])
+    .select();
+
+  if (relError) throw relError;
+  if (!relData || relData.length === 0) throw new Error("Falha ao registrar relatório (ID não retornado).");
+
+  const newReportId = relData[0].id;
+
+  // 2. Insert Viaturas
+  if (payload.lista_viaturas && payload.lista_viaturas.length > 0) {
+    const vtrsPayload = payload.lista_viaturas.map(v => ({
+      relatorio_id: newReportId,
+      prefixo: v.prefixo,
+      modelo: v.modelo,
+      placa: v.placa || '',
+      km_inicial: Number(v.km_inicial) || 0,
+      km_final: Number(v.km_final) || 0
+    }));
+    const { error: errVtrs } = await supabase.from('viaturas').insert(vtrsPayload);
+    if (errVtrs) console.error("Erro ao persistir viaturas no Supabase:", errVtrs);
+  }
+
+  // 3. Insert Ocorrências
+  if (payload.lista_ocorrencias && payload.lista_ocorrencias.length > 0) {
+    const ocosPayload = payload.lista_ocorrencias.map(o => ({
+      relatorio_id: newReportId,
+      natureza_ocorrencia: o.natureza_ocorrencia,
+      ocorrencia_bo: o.ocorrencia_bo || '',
+      suspeitos_conduzidos: Number(o.suspeitos_conduzidos) || 0,
+      observacoes: o.observacoes,
+      local_fato: o.local_fato || ''
+    }));
+    const { error: errOcos } = await supabase.from('ocorrencias').insert(ocosPayload);
+    if (errOcos) console.error("Erro ao persistir ocorrências no Supabase:", errOcos);
+  }
+
+  // 4. Insert Guarnições & Cadastrar Integrantes na Tabela de Associação
+  if (payload.lista_guarnicoes && payload.lista_guarnicoes.length > 0) {
+    for (const g of payload.lista_guarnicoes) {
+      const { data: guarData, error: errGuar } = await supabase
+        .from('guarnicoes')
+        .insert([{
+          relatorio_id: newReportId,
+          nome_guarnicao: g.nome_guarnicao,
+          tipo_guarnicao: g.tipo_guarnicao,
+          viatura: g.viatura,
+          comandante_guarnicao: g.comandante_guarnicao,
+          policiais_integrantes: g.policiais_integrantes,
+          horario_inicial: g.horario_inicial,
+          horario_final: g.horario_final
+        }])
+        .select();
+
+      if (errGuar) {
+        console.error("Erro ao cadastrar guarnição no Supabase:", errGuar);
+        continue;
+      }
+
+      const generatedGuarId = guarData?.[0]?.id;
+      if (generatedGuarId) {
+        // Encontrar as matrículas pelo padrão: Mat. (XXX.XXX)
+        const matches = g.policiais_integrantes.match(/Mat\.\s*([0-9.]+)/g) || [];
+        const matriculasList = matches.map(m => m.replace(/Mat\.\s*/, '').trim());
+
+        if (matriculasList.length > 0) {
+          const links = matriculasList.map(mat => ({
+            guarnicao_id: generatedGuarId,
+            policial_matricula: mat
+          }));
+          const { error: errLinks } = await supabase.from('integrantes_guarnicao').insert(links);
+          if (errLinks) console.error("Erro ao registrar integrantes da guarnição no database:", errLinks);
+        }
+      }
+    }
+  }
+
+  // 5. Insert Atividades Delegadas
+  if (payload.lista_atividades_delegadas && payload.lista_atividades_delegadas.length > 0) {
+    const delegsPayload = payload.lista_atividades_delegadas.map(ad => ({
+      relatorio_id: newReportId,
+      nome_equipe: ad.nome_equipe,
+      viatura: ad.viatura,
+      policiais: ad.policiais,
+      local_operacao: ad.local_operacao,
+      horario: ad.horario,
+      observacoes: ad.observacoes || ''
+    }));
+    const { error: errDelegs } = await supabase.from('atividades_delegadas').insert(delegsPayload);
+    if (errDelegs) console.error("Erro ao persistir Atividade Delegada no Supabase:", errDelegs);
+  }
+
+  // 6. Insert Jornadas Extraordinárias
+  if (payload.lista_jornadas_extraordinarias && payload.lista_jornadas_extraordinarias.length > 0) {
+    const jornsPayload = payload.lista_jornadas_extraordinarias.map(je => ({
+      relatorio_id: newReportId,
+      nome_equipe: je.nome_equipe,
+      viatura: je.viatura,
+      policiais: je.policiais,
+      tipo_reforco: je.tipo_reforco,
+      horario: je.horario,
+      observacoes: je.observacoes || ''
+    }));
+    const { error: errJorns } = await supabase.from('jornadas_extraordinarias').insert(jornsPayload);
+    if (errJorns) console.error("Erro ao persistir Jornada Extraordinária no Supabase:", errJorns);
+  }
+
+  // Retornar toda a estrutura organizada
+  return {
+    ...relData[0],
+    lista_viaturas: payload.lista_viaturas || [],
+    lista_ocorrencias: payload.lista_ocorrencias || [],
+    lista_guarnicoes: payload.lista_guarnicoes || [],
+    lista_atividades_delegadas: payload.lista_atividades_delegadas || [],
+    lista_jornadas_extraordinarias: payload.lista_jornadas_extraordinarias || [],
+    lista_anexos: []
+  };
+};
+
+// LocalDatabase helper object for full offline-persistence fallback
 export const LocalDb = {
   getReports(): PoliceReport[] {
     const raw = localStorage.getItem('rdspm_local_reports');
     if (!raw) {
-      localStorage.setItem('rdspm_local_reports', JSON.stringify(initialLocalReports));
-      return initialLocalReports;
+      localStorage.setItem('rdspm_local_reports', JSON.stringify([]));
+      return [];
     }
     try {
       return JSON.parse(raw);
     } catch {
-      return initialLocalReports;
+      return [];
     }
   },
 

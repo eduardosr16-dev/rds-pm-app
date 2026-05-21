@@ -4,7 +4,22 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { PoliceReport, Viatura, OcorrenciaItem, AnexoItem, UserSession } from '../types';
+import { 
+  PoliceReport, 
+  Viatura, 
+  OcorrenciaItem, 
+  AnexoItem, 
+  UserSession,
+  GuarnicaoItem,
+  AtividadeDelegadaItem,
+  JornadaExtraordinariaItem
+} from '../types';
+import { 
+  LISTA_POLICIAIS_PMMT, 
+  OBTER_PESO_PATENTE, 
+  OBTER_NOME_GUERRA_OU_ABREVIADO, 
+  PolicialPMMT 
+} from '../data/policiais';
 import { 
   ShieldAlert, 
   Calendar, 
@@ -35,11 +50,8 @@ interface ReportFormProps {
 }
 
 const SHIFT_OPTIONS = [
-  'Serviço Noturno (18h às 06h)',
-  'Serviço Vespertino (12h às 18h)',
-  'Serviço Matutino (06h às 12h)',
-  'Escala de 24h (Turno Extraordinário)',
-  'Serviço Administrativo de Apoio',
+  '1º Turno (Diurno)',
+  '2º Turno (Noturno)',
 ];
 
 const CITITES_OPTIONS = [
@@ -138,6 +150,132 @@ export default function ReportForm({ onSubmit, currentUserSession }: ReportFormP
   const [anexoNome, setAnexoNome] = useState('');
   const [anexoTipo, setAnexoTipo] = useState<'imagem' | 'pdf' | 'outro'>('imagem');
 
+  // 4. GUARNIÇÃO DE SERVIÇO PMMT
+  const [listaGuarnicoes, setListaGuarnicoes] = useState<GuarnicaoItem[]>([
+    {
+      nome_guarnicao: 'Guarnição 1901',
+      tipo_guarnicao: 'Rádio Patrulha',
+      viatura: 'VTR-1919 (Toyota Hilux)',
+      policiais_integrantes: 'Sgt PM Mário, Cb PM J. Silva, Sd PM Ramos',
+      comandante_guarnicao: 'Sgt PM Mário',
+      horario_inicial: '07:00',
+      horario_final: '19:00'
+    }
+  ]);
+  const [gNome, setGNome] = useState('');
+  const [gTipo, setGTipo] = useState<GuarnicaoItem['tipo_guarnicao']>('Rádio Patrulha');
+  const [gVtr, setGVtr] = useState('');
+  const [gPoliciais, setGPoliciais] = useState('');
+  const [gComandante, setGComandante] = useState('');
+  const [gHorarioInicial, setGHorarioInicial] = useState('07:00');
+  const [gHorarioFinal, setGHorarioFinal] = useState('19:00');
+
+  // 5. ATIVIDADE DELEGADA
+  const [listaAtividadesDelegadas, setListaAtividadesDelegadas] = useState<AtividadeDelegadaItem[]>([
+    {
+      nome_equipe: 'Equipe Cidade Querência',
+      viatura: 'VTR-1933 (Renault Duster)',
+      policiais: 'Cb PM Douglas, Sd PM Lima',
+      local_operacao: 'Centro Comercial de Querência',
+      horario: '08:00 às 14:00',
+      observacoes: 'Policiamento ostensivo preventivo intensificado nos comércios.'
+    }
+  ]);
+  const [adNomeEquipe, setAdNomeEquipe] = useState('');
+  const [adViatura, setAdViatura] = useState('');
+  const [adPoliciais, setAdPoliciais] = useState('');
+  const [adLocalOperacao, setAdLocalOperacao] = useState('');
+  const [adHorario, setAdHorario] = useState('08:00 às 14:00');
+  const [adObservacoes, setAdObservacoes] = useState('');
+
+  // 6. JORNADA EXTRAORDINÁRIA
+  const [listaJornadasExtraordinarias, setListaJornadasExtraordinarias] = useState<JornadaExtraordinariaItem[]>([
+    {
+      nome_equipe: 'Reforço Noturno Querência',
+      viatura: 'VTR-1944 (Toyota Hilux)',
+      policiais: 'Sgt PM Mota, Sd PM Antunes',
+      tipo_reforco: 'Saturação de Área',
+      horario: '18:00 às 23:00',
+      observacoes: 'Saturação intensiva com foco no perímetro comercial bancário.'
+    }
+  ]);
+  const [jeNomeEquipe, setJeNomeEquipe] = useState('');
+  const [jeViatura, setJeViatura] = useState('');
+  const [jePoliciais, setJePoliciais] = useState('');
+  const [jeTipoReforco, setJeTipoReforco] = useState('Policiamento Ostensivo');
+  const [jeHorario, setJeHorario] = useState('18:00 às 23:00');
+  const [jeObservacoes, setJeObservacoes] = useState('');
+
+  // SELEÇÕES DO BANCO DE DADOS DE POLICIAIS PMMT
+  const [gSelectedPMs, setGSelectedPMs] = useState<PolicialPMMT[]>([]);
+  const [adSelectedPMs, setAdSelectedPMs] = useState<PolicialPMMT[]>([]);
+  const [jeSelectedPMs, setJeSelectedPMs] = useState<PolicialPMMT[]>([]);
+
+  // Termos de busca e filtros do banco de dados de policiais
+  const [gPMSearchText, setGPMSearchText] = useState('');
+  const [gPMFilterRank, setGPMFilterRank] = useState('TODOS');
+  const [gShowPMSelector, setGShowPMSelector] = useState(false);
+
+  const [adPMSearchText, setAdPMSearchText] = useState('');
+  const [adPMFilterRank, setAdPMFilterRank] = useState('TODOS');
+  const [adShowPMSelector, setAdShowPMSelector] = useState(false);
+
+  const [jePMSearchText, setJePMSearchText] = useState('');
+  const [jePMFilterRank, setJePMFilterRank] = useState('TODOS');
+  const [jeShowPMSelector, setJeShowPMSelector] = useState(false);
+
+  // Toggle Handlers para o banco
+  const handleToggleGMPolicial = (policial: PolicialPMMT) => {
+    const exists = gSelectedPMs.some(p => p.matricula === policial.matricula);
+    let updated: PolicialPMMT[];
+    if (exists) {
+      updated = gSelectedPMs.filter(p => p.matricula !== policial.matricula);
+    } else {
+      updated = [...gSelectedPMs, policial];
+    }
+    setGSelectedPMs(updated);
+
+    // Formatar texto com graduação, nome e matrícula
+    const pStr = updated.map(p => `${p.graduacao} ${p.nome_completo} (Mat. ${p.matricula})`).join(', ');
+    setGPoliciais(pStr);
+
+    // Definição automática do comandante pela maior patente
+    if (updated.length > 0) {
+      const sortedByRank = [...updated].sort((a, b) => OBTER_PESO_PATENTE(b.graduacao) - OBTER_PESO_PATENTE(a.graduacao));
+      setGComandante(`${sortedByRank[0].graduacao} ${sortedByRank[0].nome_completo}`);
+    } else {
+      setGComandante('');
+    }
+  };
+
+  const handleToggleAdPolicial = (policial: PolicialPMMT) => {
+    const exists = adSelectedPMs.some(p => p.matricula === policial.matricula);
+    let updated: PolicialPMMT[];
+    if (exists) {
+      updated = adSelectedPMs.filter(p => p.matricula !== policial.matricula);
+    } else {
+      updated = [...adSelectedPMs, policial];
+    }
+    setAdSelectedPMs(updated);
+
+    const pStr = updated.map(p => `${p.graduacao} ${p.nome_completo} (Mat. ${p.matricula})`).join(', ');
+    setAdPoliciais(pStr);
+  };
+
+  const handleToggleJePolicial = (policial: PolicialPMMT) => {
+    const exists = jeSelectedPMs.some(p => p.matricula === policial.matricula);
+    let updated: PolicialPMMT[];
+    if (exists) {
+      updated = jeSelectedPMs.filter(p => p.matricula !== policial.matricula);
+    } else {
+      updated = [...jeSelectedPMs, policial];
+    }
+    setJeSelectedPMs(updated);
+
+    const pStr = updated.map(p => `${p.graduacao} ${p.nome_completo} (Mat. ${p.matricula})`).join(', ');
+    setJePoliciais(pStr);
+  };
+
   // UI state
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
@@ -173,6 +311,111 @@ export default function ReportForm({ onSubmit, currentUserSession }: ReportFormP
     setListaViaturas([]);
     setListaOcorrencias([]);
     setListaAnexos([]);
+    setListaGuarnicoes([]);
+    setListaAtividadesDelegadas([]);
+    setListaJornadasExtraordinarias([]);
+    setGNome('');
+    setGVtr('');
+    setGPoliciais('');
+    setGComandante('');
+    setAdNomeEquipe('');
+    setAdViatura('');
+    setAdPoliciais('');
+    setAdLocalOperacao('');
+    setAdObservacoes('');
+    setJeNomeEquipe('');
+    setJeViatura('');
+    setJePoliciais('');
+    setJeObservacoes('');
+  };
+
+  // Handlers for Guarnição
+  const handleAddGuarnicao = (e: React.MouseEvent) => {
+    e.preventDefault();
+    if (!gNome.trim() || !gVtr.trim() || !gPoliciais.trim() || !gComandante.trim()) {
+      alert('Por favor, preencha os campos obrigatórios da Guarnição: Nome, Viatura, Policiais integrantes e Comandante.');
+      return;
+    }
+    const row: GuarnicaoItem = {
+      nome_guarnicao: gNome.trim(),
+      tipo_guarnicao: gTipo,
+      viatura: gVtr.trim(),
+      policiais_integrantes: gPoliciais.trim(),
+      comandante_guarnicao: gComandante.trim(),
+      horario_inicial: gHorarioInicial,
+      horario_final: gHorarioFinal,
+    };
+    setListaGuarnicoes([...listaGuarnicoes, row]);
+    setGNome('');
+    setGVtr('');
+    setGPoliciais('');
+    setGComandante('');
+    setGSelectedPMs([]);
+    setGPMSearchText('');
+    setGShowPMSelector(false);
+  };
+
+  const handleRemoveGuarnicao = (index: number) => {
+    setListaGuarnicoes(listaGuarnicoes.filter((_, idx) => idx !== index));
+  };
+
+  // Handlers for Atividade Delegada
+  const handleAddAtividadeDelegada = (e: React.MouseEvent) => {
+    e.preventDefault();
+    if (!adNomeEquipe.trim() || !adViatura.trim() || !adPoliciais.trim() || !adLocalOperacao.trim()) {
+      alert('Por favor, preencha as informações obrigatórias da Equipe Delegada.');
+      return;
+    }
+    const row: AtividadeDelegadaItem = {
+      nome_equipe: adNomeEquipe.trim(),
+      viatura: adViatura.trim(),
+      policiais: adPoliciais.trim(),
+      local_operacao: adLocalOperacao.trim(),
+      horario: adHorario.trim(),
+      observacoes: adObservacoes.trim() || undefined,
+    };
+    setListaAtividadesDelegadas([...listaAtividadesDelegadas, row]);
+    setAdNomeEquipe('');
+    setAdViatura('');
+    setAdPoliciais('');
+    setAdLocalOperacao('');
+    setAdObservacoes('');
+    setAdSelectedPMs([]);
+    setAdPMSearchText('');
+    setAdShowPMSelector(false);
+  };
+
+  const handleRemoveAtividadeDelegada = (index: number) => {
+    setListaAtividadesDelegadas(listaAtividadesDelegadas.filter((_, idx) => idx !== index));
+  };
+
+  // Handlers for Jornada Extraordinária
+  const handleAddJornadaExtra = (e: React.MouseEvent) => {
+    e.preventDefault();
+    if (!jeNomeEquipe.trim() || !jeViatura.trim() || !jePoliciais.trim()) {
+      alert('Por favor, preencha as informações obrigatórias da Jornada Extra.');
+      return;
+    }
+    const row: JornadaExtraordinariaItem = {
+      nome_equipe: jeNomeEquipe.trim(),
+      viatura: jeViatura.trim(),
+      policiais: jePoliciais.trim(),
+      tipo_reforco: jeTipoReforco.trim(),
+      horario: jeHorario.trim(),
+      observacoes: jeObservacoes.trim() || undefined,
+    };
+    setListaJornadasExtraordinarias([...listaJornadasExtraordinarias, row]);
+    setJeNomeEquipe('');
+    setJeViatura('');
+    setJePoliciais('');
+    setJeObservacoes('');
+    setJeSelectedPMs([]);
+    setJePMSearchText('');
+    setJeShowPMSelector(false);
+  };
+
+  const handleRemoveJornadaExtra = (index: number) => {
+    setListaJornadasExtraordinarias(listaJornadasExtraordinarias.filter((_, idx) => idx !== index));
   };
 
   const handleQuickSelectOperacao = (opName: string) => {
@@ -326,7 +569,10 @@ export default function ReportForm({ onSubmit, currentUserSession }: ReportFormP
       // Nested structural entities
       lista_viaturas: listaViaturas,
       lista_ocorrencias: listaOcorrencias,
-      lista_anexos: listaAnexos
+      lista_anexos: listaAnexos,
+      lista_guarnicoes: listaGuarnicoes,
+      lista_atividades_delegadas: listaAtividadesDelegadas,
+      lista_jornadas_extraordinarias: listaJornadasExtraordinarias
     };
 
     try {
@@ -506,13 +752,810 @@ export default function ReportForm({ onSubmit, currentUserSession }: ReportFormP
           </div>
         </div>
 
+        {/* BLOCO: GUARNIÇÃO DE SERVIÇO */}
+        <div className="bg-slate-950/50 p-5 rounded-xl border border-slate-850/60 space-y-4" id="bloco-guarnicao">
+          <div className="text-xs font-mono text-amber-400 uppercase font-semibold flex items-center justify-between border-b border-slate-800/60 pb-2 mb-2">
+            <span className="flex items-center gap-1.5">
+              <ShieldCheck className="h-3.5 w-3.5 text-amber-500" />
+              <span>02. Guarnição de Serviço (Efetivo Operacional)</span>
+            </span>
+            <span className="text-[10px] text-slate-500 font-mono">Estrutura Interna PMMT</span>
+          </div>
 
-        {/* BLOC 2: SUBTABELA INTERATIVA - VIATURAS EMPENHADAS */}
+          {/* New row Sub-Form */}
+          <div className="p-4 bg-slate-900 border border-slate-800/60 rounded-xl space-y-3">
+            <span className="text-[11px] font-mono text-slate-400 uppercase block font-bold">Lançar nova Guarnição:</span>
+            
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div>
+                <label className="block text-[10px] text-slate-400 font-sans mb-1">Nome da Guarnição *</label>
+                <input
+                  type="text"
+                  value={gNome}
+                  onChange={(e) => setGNome(e.target.value)}
+                  placeholder="Ex: Rádio Patrulha 1901"
+                  className="w-full bg-slate-950 border border-slate-800 text-slate-200 text-xs rounded p-2 outline-none focus:border-amber-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[10px] text-slate-400 font-sans mb-1">Tipo da Guarnição *</label>
+                <select
+                  value={gTipo}
+                  onChange={(e) => setGTipo(e.target.value as any)}
+                  className="w-full bg-slate-950 border border-slate-800 text-slate-200 text-xs rounded p-2 outline-none focus:border-amber-500"
+                >
+                  <option value="Rádio Patrulha">Rádio Patrulha</option>
+                  <option value="Força Tática">Força Tática</option>
+                  <option value="Patrulhamento Rural">Patrulhamento Rural</option>
+                  <option value="CPU">CPU</option>
+                  <option value="Maria da Penha">Maria da Penha</option>
+                  <option value="Outro">Outro</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-[10px] text-slate-400 font-sans mb-1">Viatura *</label>
+                <input
+                  type="text"
+                  value={gVtr}
+                  onChange={(e) => setGVtr(e.target.value)}
+                  placeholder="Ex: VTR-1919 (Toyota Hilux)"
+                  className="w-full bg-slate-950 border border-slate-800 text-slate-200 text-xs rounded p-2 outline-none focus:border-amber-500"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-[10px] text-slate-400 font-sans mb-1">Policiais integrantes *</label>
+                <input
+                  type="text"
+                  value={gPoliciais}
+                  onChange={(e) => setGPoliciais(e.target.value)}
+                  placeholder="Ex: Sgt PM Mário, Cb PM J. Silva, Sd PM Ramos"
+                  className="w-full bg-slate-950 border border-slate-100/10 text-slate-200 text-xs rounded p-2 outline-none focus:border-amber-500"
+                />
+                
+                {/* INTERACTIVE PMMT OFFICERS SELETOR */}
+                <div className="mt-1.5 animate-fade-in">
+                  <button
+                    type="button"
+                    onClick={() => setGShowPMSelector(!gShowPMSelector)}
+                    className="text-[10px] text-amber-500 hover:text-amber-450 font-mono flex items-center gap-1 border border-amber-950/40 px-2 py-1 bg-amber-950/10 rounded transition cursor-pointer"
+                  >
+                    <Users className="w-3 h-3 text-amber-500" />
+                    <span>{gShowPMSelector ? 'Fechar Seletor de Policiais (-)' : 'Buscar / Selecionar do Banco PMMT (+)'}</span>
+                  </button>
+
+                  {gShowPMSelector && (
+                    <div className="mt-2 p-3 bg-slate-950 border border-slate-800/80 rounded-lg space-y-3 shadow-xl">
+                      <div className="flex flex-col sm:flex-row gap-2 items-center justify-between">
+                        <div className="w-full sm:w-1/2 relative">
+                          <input 
+                            type="text"
+                            value={gPMSearchText}
+                            onChange={(e) => setGPMSearchText(e.target.value)}
+                            placeholder="Buscar por nome ou matrícula..."
+                            className="w-full bg-slate-900 border border-slate-850 text-slate-200 text-xs rounded p-1.5 pl-6 placeholder-slate-500 outline-none focus:border-amber-500"
+                          />
+                          <span className="absolute left-1.5 top-2 text-[10px] text-slate-500">🔍</span>
+                        </div>
+
+                        {/* Badges for Rank filtering */}
+                        <div className="flex flex-wrap gap-1">
+                          {['TODOS', 'CAP', 'TEN', 'SGT', 'CB', 'SD'].map((rank) => (
+                            <button
+                              key={rank}
+                              type="button"
+                              onClick={() => setGPMFilterRank(rank)}
+                              className={`text-[9px] font-mono px-1.5 py-0.5 rounded border transition cursor-pointer ${
+                                gPMFilterRank === rank 
+                                  ? 'bg-amber-500 text-slate-950 border-amber-500 font-bold' 
+                                  : 'bg-slate-900 text-slate-450 border-slate-800 hover:text-slate-200'
+                              }`}
+                            >
+                              {rank}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Officers Results Grid */}
+                      <div className="max-h-44 overflow-y-auto divide-y divide-slate-900/40 text-xs font-sans">
+                        {LISTA_POLICIAIS_PMMT.filter(p => {
+                          const textMatch = p.nome_completo.toLowerCase().includes(gPMSearchText.toLowerCase()) || 
+                                            p.matricula.includes(gPMSearchText) || 
+                                            p.graduacao.toLowerCase().includes(gPMSearchText.toLowerCase());
+                          
+                          if (gPMFilterRank === 'TODOS') return textMatch;
+                          if (gPMFilterRank === 'CAP') return textMatch && p.graduacao.startsWith('CAP');
+                          if (gPMFilterRank === 'TEN') return textMatch && p.graduacao.includes('TEN');
+                          if (gPMFilterRank === 'SGT') return textMatch && p.graduacao.includes('SGT');
+                          if (gPMFilterRank === 'CB') return textMatch && p.graduacao.startsWith('CB');
+                          if (gPMFilterRank === 'SD') return textMatch && p.graduacao.startsWith('SD');
+                          return textMatch;
+                        }).length === 0 ? (
+                          <div className="text-center py-3 text-slate-500 text-xs italic">Nenhum policial encontrado.</div>
+                        ) : (
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-1 p-1">
+                            {LISTA_POLICIAIS_PMMT.filter(p => {
+                              const textMatch = p.nome_completo.toLowerCase().includes(gPMSearchText.toLowerCase()) || 
+                                                p.matricula.includes(gPMSearchText) || 
+                                                p.graduacao.toLowerCase().includes(gPMSearchText.toLowerCase());
+                              
+                              if (gPMFilterRank === 'TODOS') return textMatch;
+                              if (gPMFilterRank === 'CAP') return textMatch && p.graduacao.startsWith('CAP');
+                              if (gPMFilterRank === 'TEN') return textMatch && p.graduacao.includes('TEN');
+                              if (gPMFilterRank === 'SGT') return textMatch && p.graduacao.includes('SGT');
+                              if (gPMFilterRank === 'CB') return textMatch && p.graduacao.startsWith('CB');
+                              if (gPMFilterRank === 'SD') return textMatch && p.graduacao.startsWith('SD');
+                              return textMatch;
+                            }).map((pol) => {
+                              const isSelected = gSelectedPMs.some(item => item.matricula === pol.matricula);
+                              return (
+                                <button
+                                  key={pol.matricula}
+                                  type="button"
+                                  onClick={() => handleToggleGMPolicial(pol)}
+                                  className={`flex items-center justify-between p-1.5 rounded border text-left cursor-pointer transition text-[11px] ${
+                                    isSelected 
+                                      ? 'bg-amber-500/10 border-amber-500 text-amber-200' 
+                                      : 'bg-slate-900/60 border-slate-800 hover:border-slate-700 text-slate-400'
+                                  }`}
+                                >
+                                  <div className="truncate max-w-[85%]">
+                                    <div className="font-semibold flex items-center gap-1.5 text-white">
+                                      <span className="text-amber-500 font-mono text-[9px] px-1 bg-slate-950 border border-slate-800 rounded">
+                                        {pol.graduacao}
+                                      </span>
+                                      <span className="truncate">{OBTER_NOME_GUERRA_OU_ABREVIADO('', pol.nome_completo).replace(pol.graduacao, '').trim()}</span>
+                                    </div>
+                                    <div className="text-[9px] font-mono text-slate-500">Mat: {pol.matricula}</div>
+                                  </div>
+                                  <div>
+                                    {isSelected ? (
+                                      <span className="text-[9px] text-amber-400 font-bold bg-amber-500/20 px-1 py-0.5 rounded border border-amber-500/30">✓</span>
+                                    ) : (
+                                      <span className="text-[9px] text-slate-500 hover:text-slate-350">+ Sec</span>
+                                    )}
+                                  </div>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[10px] text-slate-400 font-sans mb-1">Comandante da guarnição *</label>
+                <input
+                  type="text"
+                  value={gComandante}
+                  onChange={(e) => setGComandante(e.target.value)}
+                  placeholder="Ex: Sgt PM Mário (Definido por maior patente selecionada)"
+                  className="w-full bg-slate-950 border border-slate-800 text-slate-200 text-xs rounded p-2 outline-none focus:border-amber-500"
+                />
+                <span className="text-[9px] text-slate-500 font-mono block mt-1">Preenchido automaticamente ao selecionar os integrantes.</span>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 max-w-sm">
+              <div>
+                <label className="block text-[10px] text-slate-400 font-sans mb-1">Horário Inicial *</label>
+                <input
+                  type="text"
+                  value={gHorarioInicial}
+                  onChange={(e) => setGHorarioInicial(e.target.value)}
+                  placeholder="Ex: 07:00"
+                  className="w-full bg-slate-950 border border-slate-800 text-slate-200 text-xs rounded p-2 outline-none focus:border-amber-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[10px] text-slate-400 font-sans mb-1">Horário Final *</label>
+                <input
+                  type="text"
+                  value={gHorarioFinal}
+                  onChange={(e) => setGHorarioFinal(e.target.value)}
+                  placeholder="Ex: 19:00"
+                  className="w-full bg-slate-950 border border-slate-800 text-slate-200 text-xs rounded p-2 outline-none focus:border-amber-500"
+                />
+              </div>
+            </div>
+
+            <div className="flex justify-end pt-1">
+              <button
+                type="button"
+                onClick={handleAddGuarnicao}
+                className="bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold py-2 px-4 rounded border border-amber-600 flex items-center gap-1.5 transition active:scale-95"
+              >
+                <PlusCircle className="h-4 w-4 text-slate-950" />
+                <span>+ Adicionar Guarnição</span>
+              </button>
+            </div>
+          </div>
+
+          {/* List of current Guarnições in local view */}
+          {listaGuarnicoes.length === 0 ? (
+            <p className="text-xs text-slate-500 italic text-center py-2">Nenhuma Guarnição de Serviço lançada ainda.</p>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {listaGuarnicoes.map((g, idx) => (
+                <div key={idx} className="bg-slate-900 border border-slate-800/80 rounded-lg p-3.5 relative flex flex-col justify-between hover:border-amber-500 transition">
+                  <div className="space-y-2">
+                    <div className="flex items-start justify-between">
+                      <div className="space-y-0.5">
+                        <span className="text-[10px] font-bold font-mono px-2 py-0.5 bg-amber-500/10 text-amber-400 border border-amber-500/20 rounded-md uppercase">
+                          {g.tipo_guarnicao}
+                        </span>
+                        <h4 className="text-sm font-bold text-white mt-1">{g.nome_guarnicao}</h4>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveGuarnicao(idx)}
+                        className="text-slate-500 hover:text-red-400 transition"
+                        title="Remover Guarnição"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-y-2 text-xs text-slate-300 font-sans pt-1">
+                      <div>
+                        <span className="block text-[9px] text-slate-500 uppercase font-mono">Viatura:</span>
+                        <span className="font-semibold text-white">{g.viatura}</span>
+                      </div>
+                      <div>
+                        <span className="block text-[9px] text-slate-500 uppercase font-mono">Comandante:</span>
+                        <span className="font-semibold text-white">{g.comandante_guarnicao}</span>
+                      </div>
+                      <div className="col-span-2">
+                        <span className="block text-[9px] text-slate-500 uppercase font-mono">Integrantes:</span>
+                        <span className="text-slate-300">{g.policiais_integrantes}</span>
+                      </div>
+                      <div className="col-span-2 flex items-center gap-1.5 text-[11px] text-amber-300 font-mono">
+                        <Clock className="w-3.5 h-3.5 text-amber-400" />
+                        <span>Horário: {g.horario_inicial} às {g.horario_final}</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* BLOCO: ATIVIDADE DELEGADA */}
+        <div className="bg-slate-950/50 p-5 rounded-xl border border-slate-850/60 space-y-4" id="bloco-integracao-delegada">
+          <div className="text-xs font-mono text-blue-400 uppercase font-semibold flex items-center justify-between border-b border-slate-800/60 pb-2 mb-2">
+            <span className="flex items-center gap-1.5">
+              <Users className="h-3.5 w-3.5 text-blue-400" />
+              <span>03. Atividade Delegada (Apoio Municipal SESP)</span>
+            </span>
+            <span className="text-[10px] text-slate-500 font-mono">Convênios Municipais</span>
+          </div>
+
+          {/* Form */}
+          <div className="p-4 bg-slate-900 border border-slate-800/60 rounded-xl space-y-3">
+            <span className="text-[11px] font-mono text-slate-400 uppercase block font-bold">Lançar Equipe Delegada:</span>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div>
+                <label className="block text-[10px] text-slate-400 font-sans mb-1">Nome da Equipe *</label>
+                <input
+                  type="text"
+                  value={adNomeEquipe}
+                  onChange={(e) => setAdNomeEquipe(e.target.value)}
+                  placeholder="Ex: Equipe Cidade Querência"
+                  className="w-full bg-slate-950 border border-slate-800 text-slate-200 text-xs rounded p-2 outline-none focus:border-blue-400"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[10px] text-slate-400 font-sans mb-1">Viatura *</label>
+                <input
+                  type="text"
+                  value={adViatura}
+                  onChange={(e) => setAdViatura(e.target.value)}
+                  placeholder="Ex: VTR-1933 (Renault Duster)"
+                  className="w-full bg-slate-950 border border-slate-800 text-slate-200 text-xs rounded p-2 outline-none focus:border-blue-400"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[10px] text-slate-400 font-sans mb-1">Horário de Atuação *</label>
+                <input
+                  type="text"
+                  value={adHorario}
+                  onChange={(e) => setAdHorario(e.target.value)}
+                  placeholder="Ex: 08:00 às 14:00"
+                  className="w-full bg-slate-950 border border-slate-800 text-slate-200 text-xs rounded p-2 outline-none focus:border-blue-400"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-[10px] text-slate-400 font-sans mb-1">Policiais de Serviço *</label>
+                <input
+                  type="text"
+                  value={adPoliciais}
+                  onChange={(e) => setAdPoliciais(e.target.value)}
+                  placeholder="Ex: Cb PM Douglas, Sd PM Lima"
+                  className="w-full bg-slate-950 border border-slate-800 text-slate-200 text-xs rounded p-2 outline-none focus:border-blue-400"
+                />
+
+                {/* INTERACTIVE PMMT OFFICERS SELETOR FOR ATIVIDADE DELEGADA */}
+                <div className="mt-1.5 animate-fade-in">
+                  <button
+                    type="button"
+                    onClick={() => setAdShowPMSelector(!adShowPMSelector)}
+                    className="text-[10px] text-blue-400 hover:text-blue-350 font-mono flex items-center gap-1 border border-blue-950/40 px-2 py-1 bg-blue-950/10 rounded transition cursor-pointer"
+                  >
+                    <Users className="w-3 h-3 text-blue-400" />
+                    <span>{adShowPMSelector ? 'Fechar Seletor de Policiais (-)' : 'Buscar / Selecionar do Banco PMMT (+)'}</span>
+                  </button>
+
+                  {adShowPMSelector && (
+                    <div className="mt-2 p-3 bg-slate-950 border border-slate-800/80 rounded-lg space-y-3 shadow-xl">
+                      <div className="flex flex-col sm:flex-row gap-2 items-center justify-between">
+                        <div className="w-full sm:w-1/2 relative">
+                          <input 
+                            type="text"
+                            value={adPMSearchText}
+                            onChange={(e) => setAdPMSearchText(e.target.value)}
+                            placeholder="Buscar por nome ou matrícula..."
+                            className="w-full bg-slate-900 border border-slate-850 text-slate-200 text-xs rounded p-1.5 pl-6 placeholder-slate-500 outline-none focus:border-blue-400"
+                          />
+                          <span className="absolute left-1.5 top-2 text-[10px] text-slate-500">🔍</span>
+                        </div>
+
+                        {/* Badges for Rank filtering */}
+                        <div className="flex flex-wrap gap-1">
+                          {['TODOS', 'CAP', 'TEN', 'SGT', 'CB', 'SD'].map((rank) => (
+                            <button
+                              key={rank}
+                              type="button"
+                              onClick={() => setAdPMFilterRank(rank)}
+                              className={`text-[9px] font-mono px-1.5 py-0.5 rounded border transition cursor-pointer ${
+                                adPMFilterRank === rank 
+                                  ? 'bg-blue-600 text-white border-blue-600 font-bold' 
+                                  : 'bg-slate-900 text-slate-455 border-slate-800 hover:text-slate-200'
+                              }`}
+                            >
+                              {rank}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Officers Results Grid */}
+                      <div className="max-h-44 overflow-y-auto divide-y divide-slate-900/40 text-xs font-sans">
+                        {LISTA_POLICIAIS_PMMT.filter(p => {
+                          const textMatch = p.nome_completo.toLowerCase().includes(adPMSearchText.toLowerCase()) || 
+                                            p.matricula.includes(adPMSearchText) || 
+                                            p.graduacao.toLowerCase().includes(adPMSearchText.toLowerCase());
+                          
+                          if (adPMFilterRank === 'TODOS') return textMatch;
+                          if (adPMFilterRank === 'CAP') return textMatch && p.graduacao.startsWith('CAP');
+                          if (adPMFilterRank === 'TEN') return textMatch && p.graduacao.includes('TEN');
+                          if (adPMFilterRank === 'SGT') return textMatch && p.graduacao.includes('SGT');
+                          if (adPMFilterRank === 'CB') return textMatch && p.graduacao.startsWith('CB');
+                          if (adPMFilterRank === 'SD') return textMatch && p.graduacao.startsWith('SD');
+                          return textMatch;
+                        }).length === 0 ? (
+                          <div className="text-center py-3 text-slate-500 text-xs italic">Nenhum policial encontrado.</div>
+                        ) : (
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-1 p-1">
+                            {LISTA_POLICIAIS_PMMT.filter(p => {
+                              const textMatch = p.nome_completo.toLowerCase().includes(adPMSearchText.toLowerCase()) || 
+                                                p.matricula.includes(adPMSearchText) || 
+                                                p.graduacao.toLowerCase().includes(adPMSearchText.toLowerCase());
+                              
+                              if (adPMFilterRank === 'TODOS') return textMatch;
+                              if (adPMFilterRank === 'CAP') return textMatch && p.graduacao.startsWith('CAP');
+                              if (adPMFilterRank === 'TEN') return textMatch && p.graduacao.includes('TEN');
+                              if (adPMFilterRank === 'SGT') return textMatch && p.graduacao.includes('SGT');
+                              if (adPMFilterRank === 'CB') return textMatch && p.graduacao.startsWith('CB');
+                              if (adPMFilterRank === 'SD') return textMatch && p.graduacao.startsWith('SD');
+                              return textMatch;
+                            }).map((pol) => {
+                              const isSelected = adSelectedPMs.some(item => item.matricula === pol.matricula);
+                              return (
+                                <button
+                                  key={pol.matricula}
+                                  type="button"
+                                  onClick={() => handleToggleAdPolicial(pol)}
+                                  className={`flex items-center justify-between p-1.5 rounded border text-left cursor-pointer transition text-[11px] ${
+                                    isSelected 
+                                      ? 'bg-blue-600/10 border-blue-600 text-blue-200' 
+                                      : 'bg-slate-900/60 border-slate-800 hover:border-slate-700 text-slate-400'
+                                  }`}
+                                >
+                                  <div className="truncate max-w-[85%]">
+                                    <div className="font-semibold flex items-center gap-1.5 text-white">
+                                      <span className="text-blue-400 font-mono text-[9px] px-1 bg-slate-950 border border-slate-800 rounded">
+                                        {pol.graduacao}
+                                      </span>
+                                      <span className="truncate">{OBTER_NOME_GUERRA_OU_ABREVIADO('', pol.nome_completo).replace(pol.graduacao, '').trim()}</span>
+                                    </div>
+                                    <div className="text-[9px] font-mono text-slate-500">Mat: {pol.matricula}</div>
+                                  </div>
+                                  <div>
+                                    {isSelected ? (
+                                      <span className="text-[9px] text-blue-400 font-bold bg-blue-600/20 px-1 py-0.5 rounded border border-blue-600/30">✓</span>
+                                    ) : (
+                                      <span className="text-[9px] text-slate-500 hover:text-slate-350">+ Sec</span>
+                                    )}
+                                  </div>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[10px] text-slate-400 font-sans mb-1">Local da Operação *</label>
+                <input
+                  type="text"
+                  value={adLocalOperacao}
+                  onChange={(e) => setAdLocalOperacao(e.target.value)}
+                  placeholder="Ex: Centro Comercial, Setor Leste"
+                  className="w-full bg-slate-950 border border-slate-800 text-slate-200 text-xs rounded p-2 outline-none focus:border-blue-400"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-[10px] text-slate-400 font-sans mb-1">Observações Operacionais</label>
+              <textarea
+                value={adObservacoes}
+                onChange={(e) => setAdObservacoes(e.target.value)}
+                placeholder="Ex: Apoio preventivo em eventos locais, ronda no comércio local."
+                rows={1}
+                className="w-full bg-slate-950 border border-slate-800 text-slate-200 text-xs rounded p-2 outline-none focus:border-blue-400"
+              />
+            </div>
+
+            <div className="flex justify-end pt-1">
+              <button
+                type="button"
+                onClick={handleAddAtividadeDelegada}
+                className="bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold py-2 px-4 rounded border border-blue-700 flex items-center gap-1.5 transition active:scale-95"
+              >
+                <PlusCircle className="h-4 w-4 text-white" />
+                <span>+ Adicionar Equipe Delegada</span>
+              </button>
+            </div>
+          </div>
+
+          {/* List delegadas */}
+          {listaAtividadesDelegadas.length === 0 ? (
+            <p className="text-xs text-slate-500 italic text-center py-2">Nenhuma equipe de Atividade Delegada lançada.</p>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {listaAtividadesDelegadas.map((ad, idx) => (
+                <div key={idx} className="bg-slate-900 border border-slate-800/80 rounded-lg p-3.5 relative flex flex-col justify-between hover:border-blue-500 transition">
+                  <div className="space-y-2">
+                    <div className="flex items-start justify-between">
+                      <h4 className="text-sm font-bold text-white">{ad.nome_equipe}</h4>
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveAtividadeDelegada(idx)}
+                        className="text-slate-500 hover:text-red-400 transition"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-y-2 text-xs text-slate-300 font-sans">
+                      <div>
+                        <span className="block text-[9px] text-slate-500 uppercase font-mono">Viatura:</span>
+                        <span className="font-semibold text-white">{ad.viatura}</span>
+                      </div>
+                      <div>
+                        <span className="block text-[9px] text-slate-500 uppercase font-mono">Horário:</span>
+                        <span className="font-semibold text-white">{ad.horario}</span>
+                      </div>
+                      <div className="col-span-2">
+                        <span className="block text-[9px] text-slate-500 uppercase font-mono">Local:</span>
+                        <span className="font-semibold text-white flex items-center gap-1">
+                          <MapPin className="h-3.5 w-3.5 text-blue-400" />
+                          <span>{ad.local_operacao}</span>
+                        </span>
+                      </div>
+                      <div className="col-span-2">
+                        <span className="block text-[9px] text-slate-500 uppercase font-mono">Policiais:</span>
+                        <span className="text-slate-300">{ad.policiais}</span>
+                      </div>
+                      {ad.observacoes && (
+                        <div className="col-span-2 border-t border-slate-800/60 pt-1 text-[11px] text-slate-400 italic">
+                          Obs: {ad.observacoes}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* BLOCO: JORNADA EXTRAORDINÁRIA */}
+        <div className="bg-slate-950/50 p-5 rounded-xl border border-slate-850/60 space-y-4" id="bloco-jornada-extra">
+          <div className="text-xs font-mono text-emerald-400 uppercase font-semibold flex items-center justify-between border-b border-slate-800/60 pb-2 mb-2">
+            <span className="flex items-center gap-1.5">
+              <Calendar className="h-3.5 w-3.5 text-emerald-500" />
+              <span>04. Jornada Extraordinária (Reforço Escalar PMMT)</span>
+            </span>
+            <span className="text-[10px] text-slate-500 font-mono">Reforço Especial</span>
+          </div>
+
+          {/* Form */}
+          <div className="p-4 bg-slate-900 border border-slate-800/60 rounded-xl space-y-3">
+            <span className="text-[11px] font-mono text-slate-400 uppercase block font-bold">Lançar Equipe de Jornada Extraordinária:</span>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div>
+                <label className="block text-[10px] text-slate-400 font-sans mb-1">Nome da Equipe *</label>
+                <input
+                  type="text"
+                  value={jeNomeEquipe}
+                  onChange={(e) => setJeNomeEquipe(e.target.value)}
+                  placeholder="Ex: Reforço Noturno Querência"
+                  className="w-full bg-slate-950 border border-slate-800 text-slate-200 text-xs rounded p-2 outline-none focus:border-emerald-400"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[10px] text-slate-400 font-sans mb-1">Viatura *</label>
+                <input
+                  type="text"
+                  value={jeViatura}
+                  onChange={(e) => setJeViatura(e.target.value)}
+                  placeholder="Ex: VTR-1944 (Toyota Hilux)"
+                  className="w-full bg-slate-950 border border-slate-800 text-slate-200 text-xs rounded p-2 outline-none focus:border-emerald-400"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[10px] text-slate-400 font-sans mb-1">Horário *</label>
+                <input
+                  type="text"
+                  value={jeHorario}
+                  onChange={(e) => setJeHorario(e.target.value)}
+                  placeholder="Ex: 18:00 às 23:00"
+                  className="w-full bg-slate-950 border border-slate-800 text-slate-200 text-xs rounded p-2 outline-none focus:border-emerald-400"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-[10px] text-slate-400 font-sans mb-1">Policiais integrantes *</label>
+                <input
+                  type="text"
+                  value={jePoliciais}
+                  onChange={(e) => setJePoliciais(e.target.value)}
+                  placeholder="Ex: Sgt PM Mota, Sd PM Antunes"
+                  className="w-full bg-slate-950 border border-slate-800 text-slate-200 text-xs rounded p-2 outline-none focus:border-emerald-400"
+                />
+
+                {/* INTERACTIVE PMMT OFFICERS SELETOR FOR JORNADA EXTRAORDINÁRIA */}
+                <div className="mt-1.5 animate-fade-in">
+                  <button
+                    type="button"
+                    onClick={() => setJeShowPMSelector(!jeShowPMSelector)}
+                    className="text-[10px] text-emerald-400 hover:text-emerald-350 font-mono flex items-center gap-1 border border-emerald-950/40 px-2 py-1 bg-emerald-950/10 rounded transition cursor-pointer"
+                  >
+                    <Users className="w-3 h-3 text-emerald-400" />
+                    <span>{jeShowPMSelector ? 'Fechar Seletor de Policiais (-)' : 'Buscar / Selecionar do Banco PMMT (+)'}</span>
+                  </button>
+
+                  {jeShowPMSelector && (
+                    <div className="mt-2 p-3 bg-slate-950 border border-slate-800/80 rounded-lg space-y-3 shadow-xl">
+                      <div className="flex flex-col sm:flex-row gap-2 items-center justify-between">
+                        <div className="w-full sm:w-1/2 relative">
+                          <input 
+                            type="text"
+                            value={jePMSearchText}
+                            onChange={(e) => setJePMSearchText(e.target.value)}
+                            placeholder="Buscar por nome ou matrícula..."
+                            className="w-full bg-slate-900 border border-slate-850 text-slate-200 text-xs rounded p-1.5 pl-6 placeholder-slate-500 outline-none focus:border-emerald-400"
+                          />
+                          <span className="absolute left-1.5 top-2 text-[10px] text-slate-500">🔍</span>
+                        </div>
+
+                        {/* Badges for Rank filtering */}
+                        <div className="flex flex-wrap gap-1">
+                          {['TODOS', 'CAP', 'TEN', 'SGT', 'CB', 'SD'].map((rank) => (
+                            <button
+                              key={rank}
+                              type="button"
+                              onClick={() => setJePMFilterRank(rank)}
+                              className={`text-[9px] font-mono px-1.5 py-0.5 rounded border transition cursor-pointer ${
+                                jePMFilterRank === rank 
+                                  ? 'bg-emerald-600 text-white border-emerald-600 font-bold' 
+                                  : 'bg-slate-900 text-slate-455 border-slate-800 hover:text-slate-200'
+                              }`}
+                            >
+                              {rank}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Officers Results Grid */}
+                      <div className="max-h-44 overflow-y-auto divide-y divide-slate-900/40 text-xs font-sans">
+                        {LISTA_POLICIAIS_PMMT.filter(p => {
+                          const textMatch = p.nome_completo.toLowerCase().includes(jePMSearchText.toLowerCase()) || 
+                                            p.matricula.includes(jePMSearchText) || 
+                                            p.graduacao.toLowerCase().includes(jePMSearchText.toLowerCase());
+                          
+                          if (jePMFilterRank === 'TODOS') return textMatch;
+                          if (jePMFilterRank === 'CAP') return textMatch && p.graduacao.startsWith('CAP');
+                          if (jePMFilterRank === 'TEN') return textMatch && p.graduacao.includes('TEN');
+                          if (jePMFilterRank === 'SGT') return textMatch && p.graduacao.includes('SGT');
+                          if (jePMFilterRank === 'CB') return textMatch && p.graduacao.startsWith('CB');
+                          if (jePMFilterRank === 'SD') return textMatch && p.graduacao.startsWith('SD');
+                          return textMatch;
+                        }).length === 0 ? (
+                          <div className="text-center py-3 text-slate-500 text-xs italic">Nenhum policial encontrado.</div>
+                        ) : (
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-1 p-1">
+                            {LISTA_POLICIAIS_PMMT.filter(p => {
+                              const textMatch = p.nome_completo.toLowerCase().includes(jePMSearchText.toLowerCase()) || 
+                                                p.matricula.includes(jePMSearchText) || 
+                                                p.graduacao.toLowerCase().includes(jePMSearchText.toLowerCase());
+                              
+                              if (jePMFilterRank === 'TODOS') return textMatch;
+                              if (jePMFilterRank === 'CAP') return textMatch && p.graduacao.startsWith('CAP');
+                              if (jePMFilterRank === 'TEN') return textMatch && p.graduacao.includes('TEN');
+                              if (jePMFilterRank === 'SGT') return textMatch && p.graduacao.includes('SGT');
+                              if (jePMFilterRank === 'CB') return textMatch && p.graduacao.startsWith('CB');
+                              if (jePMFilterRank === 'SD') return textMatch && p.graduacao.startsWith('SD');
+                              return textMatch;
+                            }).map((pol) => {
+                              const isSelected = jeSelectedPMs.some(item => item.matricula === pol.matricula);
+                              return (
+                                <button
+                                  key={pol.matricula}
+                                  type="button"
+                                  onClick={() => handleToggleJePolicial(pol)}
+                                  className={`flex items-center justify-between p-1.5 rounded border text-left cursor-pointer transition text-[11px] ${
+                                    isSelected 
+                                      ? 'bg-emerald-600/10 border-emerald-600 text-emerald-200' 
+                                      : 'bg-slate-900/60 border-slate-800 hover:border-slate-700 text-slate-400'
+                                  }`}
+                                >
+                                  <div className="truncate max-w-[85%]">
+                                    <div className="font-semibold flex items-center gap-1.5 text-white">
+                                      <span className="text-emerald-400 font-mono text-[9px] px-1 bg-slate-950 border border-slate-800 rounded">
+                                        {pol.graduacao}
+                                      </span>
+                                      <span className="truncate">{OBTER_NOME_GUERRA_OU_ABREVIADO('', pol.nome_completo).replace(pol.graduacao, '').trim()}</span>
+                                    </div>
+                                    <div className="text-[9px] font-mono text-slate-500">Mat: {pol.matricula}</div>
+                                  </div>
+                                  <div>
+                                    {isSelected ? (
+                                      <span className="text-[9px] text-emerald-400 font-bold bg-emerald-600/20 px-1 py-0.5 rounded border border-emerald-600/30">✓</span>
+                                    ) : (
+                                      <span className="text-[9px] text-slate-500 hover:text-slate-350">+ Sec</span>
+                                    )}
+                                  </div>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[10px] text-slate-400 font-sans mb-1">Tipo de Reforço / Operação *</label>
+                <input
+                  type="text"
+                  value={jeTipoReforco}
+                  onChange={(e) => setJeTipoReforco(e.target.value)}
+                  placeholder="Ex: Saturação de Área, Lei Seca"
+                  className="w-full bg-slate-950 border border-slate-800 text-slate-200 text-xs rounded p-2 outline-none focus:border-emerald-400"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-[10px] text-slate-400 font-sans mb-1">Observações Operacionais</label>
+              <textarea
+                value={jeObservacoes}
+                onChange={(e) => setJeObservacoes(e.target.value)}
+                placeholder="Ex: Policiamento intensivo com foco no perímetro comercial bancário."
+                rows={1}
+                className="w-full bg-slate-950 border border-slate-800 text-slate-200 text-xs rounded p-2 outline-none focus:border-emerald-400"
+              />
+            </div>
+
+            <div className="flex justify-end pt-1">
+              <button
+                type="button"
+                onClick={handleAddJornadaExtra}
+                className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold py-2 px-4 rounded border border-emerald-700 flex items-center gap-1.5 transition active:scale-95"
+              >
+                <PlusCircle className="h-4 w-4 text-white" />
+                <span>+ Adicionar Jornada Extra</span>
+              </button>
+            </div>
+          </div>
+
+          {/* List extras */}
+          {listaJornadasExtraordinarias.length === 0 ? (
+            <p className="text-xs text-slate-500 italic text-center py-2">Nenhuma equipe de Jornada Extraordinária lançada.</p>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {listaJornadasExtraordinarias.map((je, idx) => (
+                <div key={idx} className="bg-slate-900 border border-slate-800/80 rounded-lg p-3.5 relative flex flex-col justify-between hover:border-emerald-500 transition">
+                  <div className="space-y-2">
+                    <div className="flex items-start justify-between">
+                      <div className="space-y-0.5">
+                        <span className="text-[10px] font-bold font-mono px-2 py-0.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-md uppercase">
+                          {je.tipo_reforco}
+                        </span>
+                        <h4 className="text-sm font-bold text-white mt-1">{je.nome_equipe}</h4>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveJornadaExtra(idx)}
+                        className="text-slate-500 hover:text-red-400 transition"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-y-2 text-xs text-slate-300 font-sans pt-1">
+                      <div>
+                        <span className="block text-[9px] text-slate-500 uppercase font-mono">Viatura:</span>
+                        <span className="font-semibold text-white">{je.viatura}</span>
+                      </div>
+                      <div>
+                        <span className="block text-[9px] text-slate-500 uppercase font-mono">Horário:</span>
+                        <span className="font-semibold text-white">{je.horario}</span>
+                      </div>
+                      <div className="col-span-2">
+                        <span className="block text-[9px] text-slate-500 uppercase font-mono">Policiais:</span>
+                        <span className="text-slate-300">{je.policiais}</span>
+                      </div>
+                      {je.observacoes && (
+                        <div className="col-span-2 border-t border-slate-800/60 pt-1 text-[11px] text-slate-400 italic">
+                          Obs: {je.observacoes}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* BLOC 5: SUBTABELA INTERATIVA - VIATURAS EMPENHADAS */}
         <div className="bg-slate-950/50 p-5 rounded-xl border border-slate-850/60 space-y-4">
           <div className="text-xs font-mono text-amber-400 uppercase font-semibold flex items-center justify-between border-b border-slate-800/60 pb-2 mb-2">
             <span className="flex items-center gap-1.5">
               <Car className="h-3.5 w-3.5" />
-              <span>02. Cadastro de Viaturas Empenhadas</span>
+              <span>05. Cadastro de Viaturas Empenhadas</span>
             </span>
             <span className="text-[10px] text-slate-500 font-mono">Tabela: viaturas (Relação 1-N)</span>
           </div>
@@ -637,7 +1680,7 @@ export default function ReportForm({ onSubmit, currentUserSession }: ReportFormP
           <div className="text-xs font-mono text-amber-400 uppercase font-semibold flex items-center justify-between border-b border-slate-800/60 pb-2 mb-2">
             <span className="flex items-center gap-1.5">
               <ShieldAlert className="h-3.5 w-3.5" />
-              <span>03. Registro de Ocorrências com Conduzidos</span>
+              <span>06. Registro de Ocorrências com Conduzidos</span>
             </span>
             <span className="text-[10px] text-slate-500 font-mono">Tabela: ocorrencias (Relação 1-N)</span>
           </div>
@@ -764,7 +1807,7 @@ export default function ReportForm({ onSubmit, currentUserSession }: ReportFormP
         <div className="bg-slate-950/50 p-5 rounded-xl border border-slate-850/60 space-y-4">
           <div className="text-xs font-mono text-amber-400 uppercase font-semibold flex items-center gap-1.5 border-b border-slate-800/60 pb-2 mb-2">
             <ShieldCheck className="h-3.5 w-3.5" />
-            <span>04. Totalizador de Produtividade do Turno</span>
+            <span>07. Totalizador de Produtividade do Turno</span>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -919,7 +1962,7 @@ export default function ReportForm({ onSubmit, currentUserSession }: ReportFormP
           <div className="text-xs font-mono text-amber-400 uppercase font-semibold flex items-center justify-between border-b border-slate-800/60 pb-2 mb-2">
             <span className="flex items-center gap-1.5">
               <Paperclip className="h-3.5 w-3.5" />
-              <span>05. Anexos e Termos de Apreensão Operacionais</span>
+              <span>08. Anexos e Termos de Apreensão Operacionais</span>
             </span>
             <span className="text-[10px] text-slate-500 font-mono">Tabela: anexos (Relação 1-N)</span>
           </div>

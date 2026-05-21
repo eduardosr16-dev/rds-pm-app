@@ -28,6 +28,37 @@ export interface AnexoItem {
   tipo: 'imagem' | 'pdf' | 'outro';
 }
 
+export interface GuarnicaoItem {
+  id?: string;
+  nome_guarnicao: string;
+  tipo_guarnicao: 'Rádio Patrulha' | 'Força Tática' | 'Patrulhamento Rural' | 'CPU' | 'Maria da Penha' | 'Outro';
+  viatura: string;
+  policiais_integrantes: string;
+  comandante_guarnicao: string;
+  horario_inicial: string;
+  horario_final: string;
+}
+
+export interface AtividadeDelegadaItem {
+  id?: string;
+  nome_equipe: string;
+  viatura: string;
+  policiais: string;
+  local_operacao: string;
+  horario: string;
+  observacoes?: string;
+}
+
+export interface JornadaExtraordinariaItem {
+  id?: string;
+  nome_equipe: string;
+  viatura: string;
+  policiais: string;
+  tipo_reforco: string;
+  horario: string;
+  observacoes?: string;
+}
+
 export interface PoliceReport {
   id: string;
   created_at: string;
@@ -62,6 +93,9 @@ export interface PoliceReport {
   lista_viaturas?: Viatura[];
   lista_ocorrencias?: OcorrenciaItem[];
   lista_anexos?: AnexoItem[];
+  lista_guarnicoes?: GuarnicaoItem[];
+  lista_atividades_delegadas?: AtividadeDelegadaItem[];
+  lista_jornadas_extraordinarias?: JornadaExtraordinariaItem[];
 }
 
 export interface UserSession {

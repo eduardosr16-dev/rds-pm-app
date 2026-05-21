@@ -6,17 +6,14 @@
 import React, { useState } from 'react';
 import { supabase, isSupabaseConfigured } from '../supabase';
 import { UserSession } from '../types';
-import { Shield, Key, Mail, UserPlus, LogIn, Laptop, Globe, Info } from 'lucide-react';
+import { Shield, LogIn, Laptop, Globe, Info } from 'lucide-react';
 
 interface LoginScreenProps {
   onLoginSuccess: (session: UserSession) => void;
 }
 
 export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
   const [name, setName] = useState('');
-  const [isSignUp, setIsSignUp] = useState(false);
   const [cargo, setCargo] = useState('Soldado');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -26,51 +23,36 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
 
   const handleLocalDemoLogin = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!email) {
-      setErrorMsg('Por favor, informe seu e-mail funcional.');
+    if (!name.trim()) {
+      setErrorMsg('Por favor, informe seu Nome de Guerra.');
       return;
     }
     
     setLoading(true);
     // Simulate tiny network delay for realism and visual feedback
     setTimeout(() => {
-      // Parse militar prefix/name if supplied
-      const cleanEmail = email.toLowerCase().trim();
-      let detectedName = name || 'Militar Demonstrativo';
-      
-      if (!name) {
-        if (cleanEmail.includes('silva')) {
-          detectedName = 'Sgt PM Silva';
-        } else if (cleanEmail.includes('gomes')) {
-          detectedName = 'Ten PM Gomes';
-        } else if (cleanEmail.includes('souza')) {
-          detectedName = 'Cb PM Souza';
-        } else {
-          const namePart = cleanEmail.split('@')[0];
-          // Capitalize first letter
-          detectedName = `${cargo} PM ${namePart.charAt(0).toUpperCase() + namePart.slice(1)}`;
-        }
-      } else {
-        detectedName = `${cargo} PM ${name}`;
-      }
+      const trimmedName = name.trim();
+      const cleanEmail = `${trimmedName.toLowerCase().replace(/[^a-z0-9]/g, '')}@pm.mt.gov.br`;
+      const detectedName = `${cargo} PM ${trimmedName}`;
 
       onLoginSuccess({
-        id: 'local-user-id',
+        id: 'local-user-id-' + trimmedName.toLowerCase().replace(/[^a-z0-5]/g, ''),
         email: cleanEmail,
         name: detectedName,
         role: cargo,
         isDemo: true
       });
       setLoading(false);
-    }, 800);
+    }, 850);
   };
 
   const handleSupabaseAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!isConfigured) return;
 
-    if (!email || !password) {
-      setErrorMsg('E-mail e senha são obrigatórios para a conexão Supabase.');
+    const trimmedName = name.trim();
+    if (!trimmedName) {
+      setErrorMsg('Por favor, informe seu Nome de Guerra.');
       return;
     }
 
@@ -78,49 +60,71 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
     setMessage(null);
     setLoading(true);
 
+    const cleanEmail = `${trimmedName.toLowerCase().replace(/[^a-z0-9]/g, '')}@pm.mt.gov.br`;
+    // Strong deterministic password to secure the auto-profile
+    const cleanPassword = `Pmmt_${trimmedName.toLowerCase().replace(/[^a-z0-9]/g, '')}_2026!`;
+
     try {
-      if (isSignUp) {
-        // Sign up logic
-        const { data, error } = await supabase!.auth.signUp({
-          email,
-          password,
-          options: {
-            data: {
-              full_name: `${cargo} PM ${name || 'Militar'}`,
-              role: cargo,
+      // 1. Try to sign in first
+      const { data, error } = await supabase!.auth.signInWithPassword({
+        email: cleanEmail,
+        password: cleanPassword
+      });
+
+      if (error) {
+        // 2. If user doesn't exist, sign up automatically
+        if (error.message.includes('Invalid login credentials') || error.message.includes('not found') || error.status === 400) {
+          const { data: signUpData, error: signUpError } = await supabase!.auth.signUp({
+            email: cleanEmail,
+            password: cleanPassword,
+            options: {
+              data: {
+                full_name: `${cargo} PM ${trimmedName}`,
+                role: cargo,
+              }
+            }
+          });
+
+          if (signUpError) throw signUpError;
+
+          if (signUpData.user) {
+            // 3. Authenticate immediately after automatic setup
+            const { data: signInData, error: signInError } = await supabase!.auth.signInWithPassword({
+              email: cleanEmail,
+              password: cleanPassword
+            });
+
+            if (signInError) throw signInError;
+
+            if (signInData.user && signInData.session) {
+              const metadata = signInData.user.user_metadata;
+              onLoginSuccess({
+                id: signInData.user.id,
+                email: signInData.user.email || cleanEmail,
+                name: metadata?.full_name || `${cargo} PM ${trimmedName}`,
+                role: metadata?.role || cargo,
+                isDemo: false
+              });
             }
           }
-        });
-
-        if (error) throw error;
-
-        if (data.user) {
-          setMessage('Cadastro realizado com sucesso! Verifique seu e-mail para confirmação se necessário, ou tente efetuar o login.');
-          setIsSignUp(false);
+        } else {
+          throw error;
         }
       } else {
-        // Sign in logic
-        const { data, error } = await supabase!.auth.signInWithPassword({
-          email,
-          password
-        });
-
-        if (error) throw error;
-
         if (data.user && data.session) {
           const metadata = data.user.user_metadata;
           onLoginSuccess({
             id: data.user.id,
-            email: data.user.email || email,
-            name: metadata?.full_name || `${metadata?.role || 'Militar'} PM Sem Nome`,
-            role: metadata?.role || 'Policial',
+            email: data.user.email || cleanEmail,
+            name: metadata?.full_name || `${cargo} PM ${trimmedName}`,
+            role: metadata?.role || cargo,
             isDemo: false
           });
         }
       }
     } catch (err: any) {
       console.error('Erro de autenticação no Supabase:', err);
-      setErrorMsg(err.message || 'Código de erro ou credenciais inválidas.');
+      setErrorMsg(err.message || 'Falha ao autenticar credenciais no painel institucional da PMMT.');
     } finally {
       setLoading(false);
     }
@@ -146,28 +150,26 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
         </div>
 
         {/* PMMT Visual Badge Header */}
-        <div className="p-8 pb-4 text-center">
-          <div className="inline-flex items-center justify-center w-20 h-20 rounded-full bg-gradient-to-tr from-blue-900 to-blue-700 border border-amber-400 p-3 mb-4 shadow-lg shadow-blue-900/30">
-            {/* SVG Crest of Polícia Militar de Mato Grosso (Symmetric interpretation) */}
-            <svg viewBox="0 0 100 100" className="w-full h-full text-amber-400 fill-current">
-              {/* Star */}
-              <polygon points="50,10 62,38 91,38 67,56 76,85 50,67 24,85 33,56 9,38 38,38" />
-              {/* Crossed Swords Swords behind */}
-              <path d="M25,25 L75,75 M75,25 L25,75" stroke="#f59e0b" strokeWidth="4" strokeLinecap="round" />
-              {/* Center shield circle */}
-              <circle cx="50" cy="53" r="14" fill="#0f172a" stroke="#f59e0b" strokeWidth="2" />
-              <path d="M50,44 L50,62 M41,53 L59,53" stroke="#f59e0b" strokeWidth="2" />
-            </svg>
+        <div className="p-8 pb-5 text-center flex flex-col items-center">
+          <div className="relative mb-4 flex items-center justify-center w-24 h-24 bg-slate-950/20 rounded-full border border-slate-800/50 p-2 shadow-2xl transition-all duration-350 hover:border-amber-500/30">
+            {/* Subtle glow background */}
+            <div className="absolute inset-x-0 inset-y-0 bg-amber-500/5 rounded-full blur-md" />
+            <img 
+              src="https://upload.wikimedia.org/wikipedia/commons/e/ea/Bras%C3%A3o_da_PMMT.svg" 
+              alt="Brasão PMMT Oficial" 
+              className="relative w-20 h-20 object-contain drop-shadow-[0_0_8px_rgba(245,158,11,0.4)]"
+              referrerPolicy="no-referrer"
+            />
           </div>
 
-          <h2 className="text-2xl font-bold font-sans tracking-tight text-white mb-1 uppercase">
+          <h2 className="text-2xl font-black font-sans tracking-tight text-white mb-1 uppercase">
             Sistema RDS-PM
           </h2>
           <p className="text-xs font-mono tracking-widest text-slate-400 uppercase">
             Polícia Militar de Mato Grosso
           </p>
-          <div className="mt-2 text-xs text-blue-400 font-medium">
-            Relatório Diário de Serviço Geral
+          <div className="mt-2 text-xs text-amber-500 font-bold font-mono uppercase tracking-wider bg-amber-950/25 border border-amber-900/30 px-2.5 py-0.5 rounded-full select-none">
+            Identificação de Serviço Rápida
           </div>
         </div>
 
@@ -176,16 +178,16 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
           {isConfigured ? (
             <div className="flex items-center gap-2 px-3 py-2 bg-emerald-950/40 border border-emerald-900/50 rounded-lg text-emerald-400 text-xs font-sans">
               <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0" />
-              <span>Conexão Supabase ativa e parametrizada.</span>
+              <span className="font-mono">Banco de Dados Supabase Conectado</span>
             </div>
           ) : (
             <div className="flex flex-col gap-1.5 p-3 bg-amber-950/40 border border-amber-900/50 rounded-lg text-amber-300 text-xs">
               <div className="flex items-center gap-2">
                 <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse shrink-0" />
-                <span className="font-semibold">Modo de Simulação Local Ativo</span>
+                <span className="font-semibold font-mono">Modo Offline Local</span>
               </div>
               <p className="text-slate-400 text-[11px] leading-relaxed">
-                As variáveis do Supabase não estão configuradas nas credenciais. Os relatórios inseridos ficarão salvos localmente neste navegador.
+                As variáveis do Supabase não estão parametrizadas. Os relatórios enviados residirão de maneira segura na memória do browser.
               </p>
             </div>
           )}
@@ -194,7 +196,7 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
         {/* Error or Neutral Messages */}
         {errorMsg && (
           <div className="mx-8 mt-2 p-3 bg-red-950/50 border border-red-900 rounded-lg text-red-300 text-xs font-sans">
-            <strong>Erro: </strong> {errorMsg}
+            <strong>Informativo:</strong> {errorMsg}
           </div>
         )}
 
@@ -209,11 +211,11 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
           
           {/* Rank/Cargo Selector */}
           <div>
-            <label className="block text-xs font-mono text-slate-400 uppercase mb-1.5">Posto / Graduação</label>
+            <label className="block text-xs font-mono font-bold text-slate-400 uppercase mb-1.5 tracking-wider">Posto / Graduação</label>
             <select
               value={cargo}
               onChange={(e) => setCargo(e.target.value)}
-              className="w-full bg-slate-950 border border-slate-800 text-slate-200 text-sm rounded-lg px-3 py-2.5 outline-none focus:border-amber-400 focus:ring-1 focus:ring-amber-400 transition"
+              className="w-full bg-slate-950 border border-slate-800 text-slate-200 text-sm rounded-lg px-3 py-2.5 outline-none focus:border-amber-400 focus:ring-1 focus:ring-amber-400 transition cursor-pointer"
             >
               <optgroup label="Oficiais">
                 <option value="Coronel">Coronel PM</option>
@@ -235,114 +237,51 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
             </select>
           </div>
 
-          {/* Full Name input for registration or customized profile */}
-          {(isSignUp || !isConfigured) && (
-            <div>
-              <label htmlFor="input-militar-nome" className="block text-xs font-mono text-slate-400 uppercase mb-1.5">Nome de Guerra</label>
-              <div className="relative">
-                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                  <Shield className="h-4.5 w-4.5 text-slate-500" />
-                </div>
-                <input
-                  id="input-militar-nome"
-                  type="text"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="EX: SILVA, GOMES, SOUZA"
-                  className="w-full bg-slate-950 border border-slate-800 text-slate-200 text-sm rounded-lg pl-10 pr-3 py-2.5 outline-none focus:border-amber-400 focus:ring-1 focus:ring-amber-400 transition placeholder-slate-600"
-                />
-              </div>
-            </div>
-          )}
-
-          {/* Functional Email Input */}
+          {/* War Name input (ALWAYS SHOWS) */}
           <div>
-            <label htmlFor="input-militar-email" className="block text-xs font-mono text-slate-400 uppercase mb-1.5">E-mail Corporativo</label>
+            <label htmlFor="input-militar-nome" className="block text-xs font-mono font-bold text-slate-400 uppercase mb-1.5 tracking-wider">Nome de Guerra</label>
             <div className="relative">
               <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                <Mail className="h-4.5 w-4.5 text-slate-500" />
+                <Shield className="h-4.5 w-4.5 text-slate-500" />
               </div>
               <input
-                id="input-militar-email"
-                type="email"
+                id="input-militar-nome"
+                type="text"
                 required
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="EX: nome.sobrenome@pm.mt.gov.br"
-                className="w-full bg-slate-950 border border-slate-800 text-slate-200 text-sm rounded-lg pl-10 pr-3 py-2.5 outline-none focus:border-amber-400 focus:ring-1 focus:ring-amber-400 transition placeholder-slate-600"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="EX: SILVA, DE SOUZA, CABRAL"
+                className="w-full bg-slate-950 border border-slate-800 text-slate-200 text-sm rounded-lg pl-10 pr-3 py-2.5 outline-none focus:border-amber-400 focus:ring-1 focus:ring-amber-400 transition placeholder-slate-600 font-mono uppercase"
               />
             </div>
           </div>
-
-          {/* Password Input for Supabase flow */}
-          {isConfigured && (
-            <div>
-              <label htmlFor="input-militar-senha" className="block text-xs font-mono text-slate-400 uppercase mb-1.5">Senha de Acesso</label>
-              <div className="relative">
-                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                  <Key className="h-4.5 w-4.5 text-slate-500" />
-                </div>
-                <input
-                  id="input-militar-senha"
-                  type="password"
-                  required
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="********"
-                  className="w-full bg-slate-950 border border-slate-800 text-slate-200 text-sm rounded-lg pl-10 pr-3 py-2.5 outline-none focus:border-amber-400 focus:ring-1 focus:ring-amber-400 transition placeholder-slate-600"
-                />
-              </div>
-            </div>
-          )}
 
           {/* Form Action Submit Button */}
           <button
             type="submit"
             disabled={loading}
             id="btn-submit-militar"
-            className="w-full bg-gradient-to-r from-blue-700 to-blue-800 hover:from-blue-600 hover:to-blue-700 disabled:from-slate-800 disabled:to-slate-800 disabled:text-slate-500 text-white font-semibold text-sm rounded-lg py-3 px-4 shadow-lg shadow-blue-950/50 hover:shadow-blue-900/20 transition-all duration-200 flex items-center justify-center gap-2 mt-6 border-b-2 border-slate-950 group pointer-events-auto"
+            className="w-full bg-gradient-to-r from-blue-700 to-blue-800 hover:from-blue-600 hover:to-blue-700 disabled:from-slate-800 disabled:to-slate-800 disabled:text-slate-500 text-white font-semibold text-sm rounded-lg py-3 px-4 shadow-lg shadow-blue-950/50 hover:shadow-blue-900/20 transition-all duration-200 flex items-center justify-center gap-2 mt-6 border-b-2 border-slate-950 group pointer-events-auto cursor-pointer"
           >
             {loading ? (
               <span className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-            ) : isSignUp ? (
-              <>
-                <UserPlus className="h-4 w-4" />
-                <span>Registrar Novo Oficial / Praça</span>
-              </>
             ) : (
               <>
                 <LogIn className="h-4 w-4 group-hover:translate-x-0.5 transition-transform" />
-                <span>{isConfigured ? 'Acessar Central RDS-PM' : 'Entrar no Sistema (Modo Local)'}</span>
+                <span>{isConfigured ? 'Acessar Central RDS-PM' : 'Acessar Central RDS-PM (Modo Local)'}</span>
               </>
             )}
           </button>
 
-          {/* Interactive Login/Sign-up switch inside Supabase state */}
-          {isConfigured ? (
-            <div className="pt-2 text-center">
-              <button
-                type="button"
-                onClick={() => {
-                  setIsSignUp(!isSignUp);
-                  setErrorMsg(null);
-                  setMessage(null);
-                }}
-                className="text-xs text-slate-400 hover:text-amber-400 transition underline underline-offset-4"
-              >
-                {isSignUp ? 'Já tem uma conta? Entre por aqui' : 'Não tem login? Cadastre seu perfil policial no Supabase'}
-              </button>
-            </div>
-          ) : (
-            <div className="pt-2 text-center text-[10px] text-slate-500 leading-relaxed max-w-xs mx-auto">
-              Como o Supabase não está inicializado na nuvem, você pode inserir qualquer e-mail para conectar ao banco embarcado temporário local.
-            </div>
-          )}
+          <div className="pt-2 text-center text-[10px] text-slate-500 leading-relaxed max-w-xs mx-auto">
+            O acesso será realizado utilizando o Nome de Guerra e Posto/Graduação indicados acima.
+          </div>
         </form>
       </div>
 
       <div className="mt-8 text-center text-slate-600 text-[11px] font-mono z-10">
-        <p>RDS-PM v2.1.0 • ASSOB/PMMT - Diretoria de Tecnologia da Informação e Comunicação</p>
-        <p className="mt-1">Governo do Estado de Mato Grosso</p>
+        <p>RDS-PM v2.2.0 • SESP/PMMT - Diretoria de Tecnologia e Operações</p>
+        <p className="mt-1">Polícia Militar de Mato Grosso</p>
       </div>
     </div>
   );

@@ -55,6 +55,8 @@ export default function ReportList({ reports, onDelete, currentUserEmail, onNavi
   // Advanced search specs (Requested: Pesquisar por data, Pesquisar por policial, Relatórios do mês)
   const [dateStart, setDateStart] = useState<string>('');
   const [dateEnd, setDateEnd] = useState<string>('');
+  const [horaInicial, setHoraInicial] = useState<string>('');
+  const [horaFinal, setHoraFinal] = useState<string>('');
   const [selectedOfficer, setSelectedOfficer] = useState<string>('Todos');
   const [selectedMonth, setSelectedMonth] = useState<string>('Todos'); // Formato YYYY-MM
   
@@ -109,6 +111,23 @@ export default function ReportList({ reports, onDelete, currentUserEmail, onNavi
     return list;
   }, [reports]);
 
+  // Chronological sort to calculate dynamic sequence numbers
+  const sortedChronologically = useMemo(() => {
+    return [...reports].sort((a, b) => {
+      return a.created_at.localeCompare(b.created_at);
+    });
+  }, [reports]);
+
+  // Dynamic automatic document numbering builder
+  const getReportDocNumber = (report: PoliceReport) => {
+    const idx = sortedChronologically.findIndex(r => r.id === report.id);
+    const seqNum = idx !== -1 ? idx + 1 : 1;
+    const formattedSeq = String(seqNum).padStart(3, '0');
+    const dateObj = new Date(report.created_at);
+    const year = isNaN(dateObj.getTime()) ? new Date().getFullYear() : dateObj.getFullYear();
+    return `Nº ${formattedSeq}/${year}`;
+  };
+
   // Handle Preset Fast Dates
   const handleSetDateRangePreset = (preset: 'hoje' | '7dias' | 'esteMes' | 'todos') => {
     const now = new Date();
@@ -129,6 +148,8 @@ export default function ReportList({ reports, onDelete, currentUserEmail, onNavi
     } else {
       setDateStart('');
       setDateEnd('');
+      setHoraInicial('');
+      setHoraFinal('');
     }
   };
 
@@ -145,8 +166,10 @@ export default function ReportList({ reports, onDelete, currentUserEmail, onNavi
         (r.cidade && r.cidade.toLowerCase().includes(searchTerm.toLowerCase())) ||
         (r.comandante_responsavel && r.comandante_responsavel.toLowerCase().includes(searchTerm.toLowerCase()));
 
-      // 2. Shift selection
-      const matchesShift = selectedShift === 'Todos' || r.turno.includes(selectedShift);
+      // 2. Shift selection (1º Turno includes 1º, Diurno, Matutino, Vespertino; 2º Turno includes 2º, Noturno)
+      const matchesShift = selectedShift === 'Todos' || 
+        (selectedShift === '1º Turno' && (r.turno.includes('1º') || r.turno.toLowerCase().includes('matutino') || r.turno.toLowerCase().includes('vespertino') || r.turno.toLowerCase().includes('diurno'))) ||
+        (selectedShift === '2º Turno' && (r.turno.includes('2º') || r.turno.toLowerCase().includes('noturno') || r.turno.toLowerCase().includes('segundo')));
       
       // 3. Seizure focus checkbox
       const hasSeizures = r.armas_apreendidas > 0 || r.municoes > 0 || r.drogas_peso > 0 || r.valores > 0;
@@ -167,9 +190,34 @@ export default function ReportList({ reports, onDelete, currentUserEmail, onNavi
         matchesMonth = reportMonth === selectedMonth;
       }
 
-      return matchesSearch && matchesShift && matchesSeizures && matchesDateStart && matchesDateEnd && matchesOfficer && matchesMonth;
+      // 7. Hourly service filter comparison (Hora Inicial / Hora Final)
+      let matchesTimeRange = true;
+      if (horaInicial || horaFinal) {
+        let reportTime = '';
+        if (r.horario_servico && r.horario_servico.includes(' às ')) {
+          reportTime = r.horario_servico.split(' às ')[0].trim(); // Ex: "07:00"
+        } else if (r.created_at) {
+          try {
+            const timePart = r.created_at.split('T')[1];
+            if (timePart) {
+              reportTime = timePart.substring(0, 5); // Ex: "10:15"
+            }
+          } catch (e) {}
+        }
+
+        if (reportTime && /^\d{2}:\d{2}$/.test(reportTime)) {
+          if (horaInicial) {
+            matchesTimeRange = matchesTimeRange && reportTime >= horaInicial;
+          }
+          if (horaFinal) {
+            matchesTimeRange = matchesTimeRange && reportTime <= horaFinal;
+          }
+        }
+      }
+
+      return matchesSearch && matchesShift && matchesSeizures && matchesDateStart && matchesDateEnd && matchesOfficer && matchesMonth && matchesTimeRange;
     });
-  }, [reports, searchTerm, selectedShift, onlyWithSeizures, dateStart, dateEnd, selectedOfficer, selectedMonth]);
+  }, [reports, searchTerm, selectedShift, onlyWithSeizures, dateStart, dateEnd, selectedOfficer, selectedMonth, horaInicial, horaFinal]);
 
   // Aggregate metrics calculation on filtered subset
   const stats = useMemo(() => {
@@ -186,7 +234,7 @@ export default function ReportList({ reports, onDelete, currentUserEmail, onNavi
     // Cities counts
     const cities: { [key: string]: number } = {};
     // Shift counts
-    const shiftMap = { Matutino: 0, Vespertino: 0, Noturno: 0, Outros: 0 };
+    const shiftMap = { Primeiro: 0, Segundo: 0, Outros: 0 };
     // KM distance
     let kmTravelled = 0;
 
@@ -200,12 +248,10 @@ export default function ReportList({ reports, onDelete, currentUserEmail, onNavi
 
       // Count shift distribution
       const shiftName = r.turno.toLowerCase();
-      if (shiftName.includes('noturno')) {
-        shiftMap.Noturno += 1;
-      } else if (shiftName.includes('vespertino')) {
-        shiftMap.Vespertino += 1;
-      } else if (shiftName.includes('matutino')) {
-        shiftMap.Matutino += 1;
+      if (shiftName.includes('2º') || shiftName.includes('segundo') || shiftName.includes('noturno')) {
+        shiftMap.Segundo += 1;
+      } else if (shiftName.includes('1º') || shiftName.includes('primeiro') || shiftName.includes('diurno') || shiftName.includes('matutino') || shiftName.includes('vespertino')) {
+        shiftMap.Primeiro += 1;
       } else {
         shiftMap.Outros += 1;
       }
@@ -308,50 +354,85 @@ export default function ReportList({ reports, onDelete, currentUserEmail, onNavi
     <div className="space-y-6" id="dashboard-institucional-container">
       
       {/* INSTITUTIONAL SUB HEADER BANNER WITH TOTALIZERS */}
-      <div className="relative bg-gradient-to-r from-slate-900 via-slate-900 to-blue-950/80 border border-slate-800 rounded-2xl p-5 md:p-6 overflow-hidden shadow-2xl" id="pmmt-badge-banner">
-        <div className="absolute top-0 right-0 h-full w-1/3 opacity-5 pointer-events-none bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-amber-400 via-transparent to-transparent"></div>
+      <div className="relative bg-gradient-to-b from-slate-900 via-slate-900 to-slate-950 border-2 border-slate-805 rounded-2xl p-6 md:p-10 shadow-2xl overflow-hidden" id="pmmt-badge-banner">
+        {/* Subtle grid pattern for texture */}
+        <div className="absolute inset-0 bg-[linear-gradient(to_right,#0f172a_1px,transparent_1px),linear-gradient(to_bottom,#0f172a_1px,transparent_1px)] bg-[size:1rem_1rem] opacity-30 pointer-events-none" />
         
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 relative z-10">
-          <div className="flex items-start md:items-center gap-4">
-            <div className="hidden sm:flex w-14 h-14 rounded-xl bg-blue-900/60 border-2 border-amber-400/70 shadow-lg shadow-blue-950/50 items-center justify-center p-2 text-amber-400 shrink-0">
-              <svg viewBox="0 0 100 100" className="w-full h-full fill-current">
-                <polygon points="50,10 62,38 91,38 67,56 76,85 50,67 24,85 33,56 9,38 38,38" />
-              </svg>
+        {/* Subtle radial glow from gold badge */}
+        <div className="absolute top-0 left-1/2 -translate-x-1/2 h-56 w-80 rounded-full opacity-15 blur-3xl pointer-events-none bg-gradient-to-tr from-amber-500 to-blue-500"></div>
+
+        <div className="relative z-10 flex flex-col items-center text-center">
+          
+          {/* PMMT Official Crest */}
+          <div className="relative mb-5 flex items-center justify-center w-24 h-24 bg-slate-950/50 rounded-full border border-slate-800/80 p-2.5 shadow-2xl transition hover:border-amber-500/30">
+            {/* Soft gold glow behind the crest */}
+            <div className="absolute inset-x-0 inset-y-0 bg-amber-500/5 rounded-full blur-md animate-pulse" />
+            <img 
+              src="https://upload.wikimedia.org/wikipedia/commons/e/ea/Bras%C3%A3o_da_PMMT.svg" 
+              alt="Brasão Oficial PMMT" 
+              className="relative w-20 h-20 object-contain drop-shadow-[0_0_8px_rgba(245,158,11,0.45)] select-none"
+              referrerPolicy="no-referrer"
+            />
+          </div>
+
+          {/* Institutional Heading lines */}
+          <div className="space-y-1.5 select-none text-center max-w-2xl">
+            <h2 className="text-[10px] sm:text-xs md:text-sm font-black tracking-[0.22em] text-slate-100 font-sans uppercase">
+              Polícia Militar do Estado de Mato Grosso
+            </h2>
+            <h3 className="text-[10px] sm:text-xs font-bold tracking-[0.15em] text-slate-300 font-sans uppercase">
+              13º Comando Regional / Médio Araguaia
+            </h3>
+            <h4 className="text-[9px] sm:text-[11px] font-medium tracking-[0.1em] text-amber-500/90 font-sans uppercase">
+              19ª Companhia de Polícia Militar de Querência
+            </h4>
+          </div>
+
+          {/* Double Separator Line */}
+          <div className="w-full max-w-xl my-5 flex items-center justify-center gap-3">
+            <div className="h-[1px] bg-gradient-to-r from-transparent via-slate-700 to-slate-700 flex-1" />
+            <div className="h-[2px] w-16 bg-amber-500 rounded-full shadow-lg shadow-amber-550/30" />
+            <div className="h-[1px] bg-gradient-to-l from-transparent via-slate-700 to-slate-700 flex-1" />
+          </div>
+
+          {/* Document Type Title */}
+          <div className="text-center space-y-1 mb-4 select-none">
+            <span className="text-[9px] sm:text-[10px] font-bold font-mono tracking-[0.25em] text-amber-500/95 uppercase">
+              Documento Oficial de Serviço
+            </span>
+            <h1 className="text-xl sm:text-2xl md:text-3xl font-black text-white font-sans tracking-[0.12em] uppercase drop-shadow-md">
+              01 - RELATÓRIO DIÁRIO
+            </h1>
+          </div>
+
+          {/* Document numbering stamp and badge */}
+          <div className="inline-flex flex-col sm:flex-row items-center gap-2 sm:gap-4 bg-slate-950/80 border border-slate-800 rounded-xl px-4 py-2 shadow-lg">
+            <div className="flex items-center gap-1.5 text-[9px] font-mono tracking-wider font-bold text-slate-400 uppercase">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse shrink-0" />
+              <span>Série Geral Eletrônica</span>
             </div>
-            <div>
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-[10px] font-bold font-mono px-2 py-0.5 bg-amber-500/20 text-amber-300 border border-amber-500/30 rounded uppercase tracking-wider">PMMT Oficial</span>
-                <span className="text-[10px] font-bold font-mono px-2 py-0.5 bg-blue-500/10 text-blue-300 border border-blue-500/20 rounded uppercase tracking-wider">Subdivisão SESP-MT</span>
-              </div>
-              <h1 className="text-xl md:text-2xl font-black text-white font-sans tracking-tight mt-1.5 uppercase">
-                Painel Tático SESP/PMMT
-              </h1>
-              <p className="text-xs text-slate-400 mt-0.5 max-w-xl">
-                Controle eletrônico institucional de efetivo, viaturas, ocorrências e apreensão integrada de bens ilícitos em Mato Grosso.
-              </p>
+            <span className="hidden sm:inline-block h-4 w-[1px] bg-slate-850" />
+            <span className="text-sm md:text-base font-black font-mono text-amber-400 tracking-wider">
+              Nº {String(reports.length || 1).padStart(3, '0')}/{new Date().getFullYear()}
+            </span>
+            <span className="hidden sm:inline-block h-4 w-[1px] bg-slate-850" />
+            <div className="text-[10px] font-mono text-slate-400">
+              {stats.count} RDS / {totalReportsEver} Cadastrados
             </div>
           </div>
 
-          <div className="flex flex-row md:flex-col items-baseline md:items-end justify-between border-t border-slate-800/80 pt-3 md:pt-0 md:border-t-0 shrink-0">
-            <div className="text-left md:text-right">
-              <span className="block text-[10px] text-slate-500 uppercase font-bold tracking-wider font-mono">Balanço do Período</span>
-              <span className="text-xl md:text-2xl font-black text-emerald-400 font-sans mt-0.5">
-                {stats.count} de {totalReportsEver}
-              </span>
-              <span className="text-[10px] text-slate-400 block font-mono">RDS filtrados no livro</span>
-            </div>
-            
-            {onNavigateToForm && (
-              <button
-                type="button"
-                onClick={onNavigateToForm}
-                className="md:mt-3 bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold px-4 py-2 rounded-lg flex items-center gap-1.5 transition shadow-lg active:scale-95 cursor-pointer max-w-max"
-              >
-                <PlusCircle className="h-4 w-4 text-slate-950" />
-                <span>Novo RDS</span>
-              </button>
-            )}
-          </div>
+          {/* Quick launch shortcut inside banner */}
+          {onNavigateToForm && (
+            <button
+              type="button"
+              onClick={onNavigateToForm}
+              className="mt-5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 text-xs font-extrabold px-4.5 py-2.5 rounded-lg flex items-center gap-1.5 transition active:scale-95 cursor-pointer shadow-lg shadow-amber-950/30 font-sans tracking-wider"
+            >
+              <PlusCircle className="h-4 w-4 text-slate-950" />
+              <span>PREENCHER NOVO RDS</span>
+            </button>
+          )}
+
         </div>
       </div>
 
@@ -445,17 +526,16 @@ export default function ReportList({ reports, onDelete, currentUserEmail, onNavi
               <span>Turno Operacional</span>
             </label>
             <div className="flex gap-1 bg-slate-950 p-1.5 rounded-lg border border-slate-800">
-              {['Todos', 'Vesp', 'Notu', 'Matu'].map((sh) => {
-                const mapShToFull = sh === 'Vesp' ? 'Vespertino' : sh === 'Notu' ? 'Noturno' : sh === 'Matu' ? 'Matutino' : 'Todos';
-                const isActive = (selectedShift === 'Todos' && mapShToFull === 'Todos') || (selectedShift !== 'Todos' && selectedShift.includes(mapShToFull));
+              {['Todos', '1º Turno', '2º Turno'].map((sh) => {
+                const isActive = selectedShift === sh;
                 return (
                   <button
                     key={sh}
                     type="button"
-                    onClick={() => setSelectedShift(mapShToFull)}
-                    className={`flex-1 text-center py-1.5 text-[10px] font-bold rounded transition-all ${
+                    onClick={() => setSelectedShift(sh)}
+                    className={`flex-1 text-center py-1.5 text-[10px] font-extrabold rounded transition-all ${
                       isActive 
-                        ? 'bg-blue-800 text-white shadow-sm' 
+                        ? 'bg-amber-500 text-slate-950 font-black shadow-sm' 
                         : 'text-slate-400 hover:text-slate-200'
                     }`}
                   >
@@ -470,28 +550,64 @@ export default function ReportList({ reports, onDelete, currentUserEmail, onNavi
         {/* ADVANCED DATE RANGE (Pesquisar por data) & FAST ACTION CHECKS */}
         <div className={`grid grid-cols-1 lg:grid-cols-12 gap-4 pt-3 border-t border-indigo-950/40 ${filtersExpanded ? 'block' : 'hidden md:grid'}`} id="date-range-segment">
           
-          {/* Calendar picker dates */}
-          <div className="lg:col-span-8 grid grid-cols-2 gap-3 items-end">
+          {/* Calendar picker dates & Time ranges */}
+          <div className="lg:col-span-8 grid grid-cols-2 sm:grid-cols-4 gap-3 items-end">
             <div className="space-y-1.5">
-              <span className="text-[10px] font-mono text-slate-400 font-bold uppercase block">Início da Ronda</span>
+              <span className="text-[10px] font-mono text-slate-400 font-bold uppercase block flex items-center gap-1 leading-none select-none">
+                <Calendar className="h-3 w-3 text-amber-500" />
+                <span>Início da Ronda</span>
+              </span>
               <div className="relative">
                 <input
                   type="date"
                   value={dateStart}
                   onChange={(e) => setDateStart(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 text-slate-300 text-xs rounded-lg px-2.5 py-2 outline-none focus:border-amber-400 transition"
+                  className="w-full bg-slate-950 border border-slate-800 text-slate-300 text-xs rounded-lg px-2.5 py-2 outline-none focus:border-amber-400 [color-scheme:dark] transition"
                 />
               </div>
             </div>
 
             <div className="space-y-1.5">
-              <span className="text-[10px] font-mono text-slate-400 font-bold uppercase block">Término da Ronda</span>
+              <span className="text-[10px] font-mono text-slate-400 font-bold uppercase block flex items-center gap-1 leading-none select-none">
+                <Calendar className="h-3 w-3 text-amber-500" />
+                <span>Término da Ronda</span>
+              </span>
               <div className="relative">
                 <input
                   type="date"
                   value={dateEnd}
                   onChange={(e) => setDateEnd(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 text-slate-300 text-xs rounded-lg px-2.5 py-2 outline-none focus:border-amber-400 transition"
+                  className="w-full bg-slate-950 border border-slate-800 text-slate-300 text-xs rounded-lg px-2.5 py-2 outline-none focus:border-amber-400 [color-scheme:dark] transition"
+                />
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <span className="text-[10px] font-mono text-slate-400 font-bold uppercase block flex items-center gap-1 leading-none select-none">
+                <Clock className="h-3 w-3 text-amber-500" />
+                <span>Hora Inicial</span>
+              </span>
+              <div className="relative">
+                <input
+                  type="time"
+                  value={horaInicial}
+                  onChange={(e) => setHoraInicial(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 text-slate-300 text-xs rounded-lg px-2.5 py-2 outline-none focus:border-amber-400 [color-scheme:dark] transition"
+                />
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <span className="text-[10px] font-mono text-slate-400 font-bold uppercase block flex items-center gap-1 leading-none select-none">
+                <Clock className="h-3 w-3 text-amber-500" />
+                <span>Hora Final</span>
+              </span>
+              <div className="relative">
+                <input
+                  type="time"
+                  value={horaFinal}
+                  onChange={(e) => setHoraFinal(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 text-slate-300 text-xs rounded-lg px-2.5 py-2 outline-none focus:border-amber-400 [color-scheme:dark] transition"
                 />
               </div>
             </div>
@@ -752,11 +868,10 @@ export default function ReportList({ reports, onDelete, currentUserEmail, onNavi
                 <span className="text-[10px] font-mono text-slate-500 uppercase font-black tracking-wider block mb-2">Volume por Horário</span>
                 <div className="space-y-2 mb-5">
                   {[
-                    { label: 'Noturno', val: stats.shifts.Noturno, color: 'bg-blue-900 border-blue-500 text-blue-300' },
-                    { label: 'Vespertino', val: stats.shifts.Vespertino, color: 'bg-amber-950/60 border-amber-500/50 text-amber-300' },
-                    { label: 'Matutino', val: stats.shifts.Matutino, color: 'bg-emerald-950/60 border-emerald-500/50 text-emerald-300' }
+                    { label: '1º Turno', val: stats.shifts.Primeiro, color: 'bg-emerald-950/60 border-emerald-500/50 text-emerald-300' },
+                    { label: '2º Turno', val: stats.shifts.Segundo, color: 'bg-blue-905 border-blue-500/50 text-blue-300' }
                   ].map(sh => {
-                    const totalShifts = stats.shifts.Noturno + stats.shifts.Vespertino + stats.shifts.Matutino + stats.shifts.Outros;
+                    const totalShifts = stats.shifts.Primeiro + stats.shifts.Segundo + stats.shifts.Outros;
                     const percent = totalShifts > 0 ? (sh.val / totalShifts) * 100 : 0;
                     return (
                       <div key={sh.label} className="flex items-center gap-2">
@@ -865,7 +980,11 @@ export default function ReportList({ reports, onDelete, currentUserEmail, onNavi
                       <div className="flex justify-between items-start gap-2 mb-3">
                         <div>
                           <div className="flex gap-1.5 flex-wrap mb-1">
-                            <span className="inline-flex items-center gap-1 text-[10px] text-amber-450 bg-amber-950/40 border border-amber-900/60 rounded px-2 py-0.5 font-mono uppercase font-semibold">
+                            <span className="inline-flex items-center gap-1 text-[10px] text-amber-400 bg-amber-954 border border-amber-500/40 rounded px-2 py-0.5 font-mono uppercase font-black tracking-wider shadow-sm">
+                              {getReportDocNumber(report)}
+                            </span>
+
+                            <span className="inline-flex items-center gap-1 text-[10px] text-slate-300 bg-slate-950 border border-slate-800 rounded px-2 py-0.5 font-mono uppercase font-semibold">
                               {report.turno.split(' (')[0]}
                             </span>
                             
@@ -1006,25 +1125,43 @@ export default function ReportList({ reports, onDelete, currentUserEmail, onNavi
             {/* PRINT AREA / OFFICIAL MARGINS */}
             <div className="p-8 md:p-12 text-slate-900 bg-white leading-relaxed" id="printable-report-paper">
               {/* Brazil/MT State Crest Placeholder & Official Heading */}
-              <div className="text-center border-b-2 border-double border-slate-800 pb-5 mb-5">
-                <div className="text-xs font-bold uppercase tracking-widest text-slate-900">
-                  ESTADO DE MATO GROSSO
-                </div>
-                <div className="text-xs font-normal uppercase tracking-wide text-slate-800">
-                  SECRETARIA DE ESTADO DE SEGURANÇA PÚBLICA
-                </div>
-                <div className="text-sm font-bold uppercase tracking-widest text-slate-950 mt-1">
-                  POLÍCIA MILITAR DE MATO GROSSO
-                </div>
-                <div className="text-[10px] font-mono font-medium text-slate-650 mt-0.5">
-                  SEÇÃO DE OPERAÇÕES E PLANEJAMENTO • DIRETORIA OPERACIONAL
+              <div className="text-center border-b-4 border-double border-slate-950 pb-5 mb-6">
+                
+                {/* Official PMMT Crest for printing (grayscale/high contrast) */}
+                <div className="w-20 h-20 mx-auto mb-4 flex items-center justify-center">
+                  <img 
+                    src="https://upload.wikimedia.org/wikipedia/commons/e/ea/Bras%C3%A3o_da_PMMT.svg" 
+                    alt="Brasão Oficial PMMT" 
+                    className="w-18 h-18 object-contain print:brightness-95 contrast-125 select-none"
+                    referrerPolicy="no-referrer"
+                  />
                 </div>
 
-                <h2 className="text-[15px] font-black tracking-wider text-slate-950 uppercase mt-4 border-2 border-slate-900 inline-block px-5 py-1.5">
-                  RELATÓRIO DIÁRIO DE SERVIÇO COMPLETO (RDS-PM)
+                <div className="text-xs sm:text-sm font-black uppercase tracking-[0.15em] text-slate-950 font-sans">
+                  POLÍCIA MILITAR DO ESTADO DE MATO GROSSO
+                </div>
+                <div className="text-[10px] sm:text-xs font-bold uppercase tracking-[0.1em] text-slate-800 mt-1 font-sans">
+                  13º COMANDO REGIONAL / MÉDIO ARAGUAIA
+                </div>
+                <div className="text-[9px] sm:text-xs font-semibold uppercase tracking-[0.05em] text-slate-700 mt-1 font-sans">
+                  19ª COMPANHIA DE POLÍCIA MILITAR DE QUERÊNCIA
+                </div>
+
+                <div className="w-full max-w-lg mx-auto my-4 border-t-2 border-slate-950" />
+
+                <div className="text-[9px] font-bold font-mono tracking-[0.25em] text-slate-500 uppercase mb-0.5">
+                  Documento Oficial de Serviço
+                </div>
+                <h2 className="text-base sm:text-lg md:text-xl font-black tracking-[0.15em] text-slate-950 uppercase">
+                  01 - RELATÓRIO DIÁRIO
                 </h2>
-                <div className="text-[10px] font-mono text-slate-600 mt-2">
-                  ID de Auditoria Eletrônica: <strong className="text-slate-950">{selectedReport.id}</strong>
+                
+                <div className="text-xs sm:text-sm font-extrabold font-mono text-slate-950 mt-1 uppercase">
+                  {getReportDocNumber(selectedReport)}
+                </div>
+
+                <div className="text-[10px] font-mono text-slate-500 mt-2">
+                  Chave Eletrônica de Autenticidade: <span className="text-slate-900 font-bold">{selectedReport.id}</span>
                 </div>
               </div>
 
@@ -1067,16 +1204,135 @@ export default function ReportList({ reports, onDelete, currentUserEmail, onNavi
                     <strong className="text-slate-900">{formatDateString(selectedReport.created_at)}</strong>
                   </div>
                   <div className="border border-slate-300 p-2 bg-slate-50/70">
-                    <span className="block text-[9px] font-mono text-slate-500 uppercase font-bold">Cadastrado por</span>
-                    <strong className="text-slate-900 truncate block">{selectedReport.user_email || 'Seção Adm'}</strong>
+                    <span className="block text-[9px] font-mono text-slate-500 uppercase font-bold">Órgão Emissor</span>
+                    <strong className="text-slate-900 truncate block">PMMT - Central RDS</strong>
                   </div>
                 </div>
               </div>
 
-              {/* SECTION 2: Viaturas Empenhadas */}
+              {/* SECTION 1.2: Guarnições de Serviço */}
               <div className="mb-5">
                 <h3 className="text-xs font-black font-mono tracking-wider uppercase text-slate-950 border-b-2 border-slate-350 pb-1 mb-2.5">
-                  2. VIATURAS EMPENHADAS E CONTROLE DE QUILOMETRAGEM
+                  1.2. GUARNIÇÕES DE SERVIÇO (EFETIVO OPERACIONAL PMMT)
+                </h3>
+                {(!selectedReport.lista_guarnicoes || selectedReport.lista_guarnicoes.length === 0) ? (
+                  <p className="text-xs text-slate-600 italic font-mono border border-slate-200 p-2.5 bg-slate-50/20">
+                    Nenhuma guarnição operacional registrada individualmente neste relatório.
+                  </p>
+                ) : (
+                  <div className="border border-slate-300 rounded-md overflow-hidden">
+                    <table className="w-full text-left text-xs border-collapse">
+                      <thead>
+                        <tr className="bg-slate-100 border-b border-slate-300 text-slate-750 font-mono text-[10px] font-black uppercase">
+                          <th className="p-2">Nome Guarnição</th>
+                          <th className="p-2">Tipo</th>
+                          <th className="p-2">Viatura</th>
+                          <th className="p-2">Comandante</th>
+                          <th className="p-2">Horário de Atuação</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-250 font-sans text-slate-900">
+                        {selectedReport.lista_guarnicoes.map((g, i) => (
+                          <tr key={i} className="hover:bg-slate-50">
+                            <td className="p-2 font-bold">{g.nome_guarnicao}</td>
+                            <td className="p-2">
+                              <span className="font-mono text-[10px] font-bold bg-slate-150 border border-slate-250 rounded px-1.5 py-0.5 text-slate-750 uppercase">
+                                {g.tipo_guarnicao}
+                              </span>
+                            </td>
+                            <td className="p-2 font-bold">{g.viatura}</td>
+                            <td className="p-2">{g.comandante_guarnicao}</td>
+                            <td className="p-2 font-mono text-[11px] text-slate-700">{g.horario_inicial} às {g.horario_final}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+
+              {/* SECTION 1.3: Atividades Delegadas */}
+              <div className="mb-5">
+                <h3 className="text-xs font-black font-mono tracking-wider uppercase text-slate-950 border-b-2 border-slate-350 pb-1 mb-2.5">
+                  1.3. EQUIPES DE ATIVIDADE DELEGADA (CONVÊNIOS MUNICIPAIS SESP)
+                </h3>
+                {(!selectedReport.lista_atividades_delegadas || selectedReport.lista_atividades_delegadas.length === 0) ? (
+                  <p className="text-xs text-slate-600 italic font-mono border border-slate-200 p-2.5 bg-slate-50/20">
+                    Nenhuma equipe de atividade delegada lançada para o turno.
+                  </p>
+                ) : (
+                  <div className="border border-slate-300 rounded-md overflow-hidden">
+                    <table className="w-full text-left text-xs border-collapse">
+                      <thead>
+                        <tr className="bg-slate-100 border-b border-slate-300 text-slate-750 font-mono text-[10px] font-black uppercase">
+                          <th className="p-2">Equipe</th>
+                          <th className="p-2">Viatura</th>
+                          <th className="p-2">Horário</th>
+                          <th className="p-2">Local da Operação</th>
+                          <th className="p-2">Policiais</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-250 font-sans text-slate-900">
+                        {selectedReport.lista_atividades_delegadas.map((ad, i) => (
+                          <tr key={i} className="hover:bg-slate-50">
+                            <td className="p-2 font-bold">{ad.nome_equipe}</td>
+                            <td className="p-2 font-mono text-slate-800">{ad.viatura}</td>
+                            <td className="p-2 font-mono text-slate-700">{ad.horario}</td>
+                            <td className="p-2 text-slate-800">{ad.local_operacao}</td>
+                            <td className="p-2 text-slate-700 text-xs">{ad.policiais}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+
+              {/* SECTION 1.4: Jornadas Extraordinárias */}
+              <div className="mb-5">
+                <h3 className="text-xs font-black font-mono tracking-wider uppercase text-slate-950 border-b-2 border-slate-350 pb-1 mb-2.5">
+                  1.4. JORNADA EXTRAORDINÁRIA (REFORÇO DE POLICIAMENTO MILITAR)
+                </h3>
+                {(!selectedReport.lista_jornadas_extraordinarias || selectedReport.lista_jornadas_extraordinarias.length === 0) ? (
+                  <p className="text-xs text-slate-600 italic font-mono border border-slate-200 p-2.5 bg-slate-50/20">
+                    Nenhum lançamento de jornada extraordinária neste turno.
+                  </p>
+                ) : (
+                  <div className="border border-slate-300 rounded-md overflow-hidden">
+                    <table className="w-full text-left text-xs border-collapse">
+                      <thead>
+                        <tr className="bg-slate-100 border-b border-slate-300 text-slate-750 font-mono text-[10px] font-black uppercase">
+                          <th className="p-2">Equipe</th>
+                          <th className="p-2">Viatura (VTR)</th>
+                          <th className="p-2">Horário</th>
+                          <th className="p-2">Tipo de Reforço</th>
+                          <th className="p-2">Policiais Integrantes</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-250 font-sans text-slate-900">
+                        {selectedReport.lista_jornadas_extraordinarias.map((je, i) => (
+                          <tr key={i} className="hover:bg-slate-50">
+                            <td className="p-2 font-bold">{je.nome_equipe}</td>
+                            <td className="p-2 font-mono text-slate-800">{je.viatura}</td>
+                            <td className="p-2 font-mono text-slate-700">{je.horario}</td>
+                            <td className="p-2 font-bold">
+                              <span className="bg-emerald-100 text-emerald-850 border border-emerald-200 text-[10px] font-black px-1.5 py-0.5 rounded font-mono uppercase">
+                                {je.tipo_reforco}
+                              </span>
+                            </td>
+                            <td className="p-2 text-slate-700 text-xs">{je.policiais}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+
+              {/* SECTION 5: Viaturas Empenhadas */}
+              <div className="mb-5">
+                <h3 className="text-xs font-black font-mono tracking-wider uppercase text-slate-950 border-b-2 border-slate-350 pb-1 mb-2.5">
+                  5. VIATURAS EMPENHADAS E CONTROLE DE QUILOMETRAGEM
                 </h3>
                 
                 {(!selectedReport.lista_viaturas || selectedReport.lista_viaturas.length === 0) ? (
@@ -1118,10 +1374,10 @@ export default function ReportList({ reports, onDelete, currentUserEmail, onNavi
                 )}
               </div>
 
-              {/* SECTION 3: Ocorrências Detalhadas */}
+              {/* SECTION 6: Ocorrências Detalhadas */}
               <div className="mb-5">
                 <h3 className="text-xs font-black font-mono tracking-wider uppercase text-slate-950 border-b-2 border-slate-350 pb-1 mb-2.5">
-                  3. OCORRÊNCIAS ATENDIDAS E SUSPEITOS CONDUZIDOS
+                  6. OCORRÊNCIAS ATENDIDAS E SUSPEITOS CONDUZIDOS
                 </h3>
 
                 {(!selectedReport.lista_ocorrencias || selectedReport.lista_ocorrencias.length === 0) ? (
@@ -1164,10 +1420,10 @@ export default function ReportList({ reports, onDelete, currentUserEmail, onNavi
                 )}
               </div>
 
-              {/* SECTION 4: Resumo de Produtividade */}
+              {/* SECTION 7: Resumo de Produtividade */}
               <div className="mb-5">
                 <h3 className="text-xs font-black font-mono tracking-wider uppercase text-slate-950 border-b-2 border-slate-350 pb-1 mb-2.5">
-                  4. QUADRO DE PRODUTIVIDADE OPERACIONAL SINTÉTICO
+                  7. QUADRO DE PRODUTIVIDADE OPERACIONAL SINTÉTICO
                 </h3>
                 
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-center text-xs font-mono mb-3">
@@ -1205,20 +1461,20 @@ export default function ReportList({ reports, onDelete, currentUserEmail, onNavi
                 )}
               </div>
 
-              {/* SECTION 5: Relatório Consolidado */}
+              {/* SECTION 8: Relatório Consolidado */}
               <div className="mb-5">
                 <h3 className="text-xs font-black font-mono tracking-wider uppercase text-slate-950 border-b-2 border-slate-350 pb-1 mb-2.5">
-                  5. NARRATIVA DIÁRIA GERAL DO SERVIÇO (CONSOLIDADO)
+                  8. NARRATIVA DIÁRIA GERAL DO SERVIÇO (CONSOLIDADO)
                 </h3>
                 <div className="border border-slate-300 p-4 bg-slate-50 text-xs text-slate-900 leading-relaxed font-mono min-h-[140px] whitespace-pre-wrap">
                   {selectedReport.ocorrencias}
                 </div>
               </div>
 
-              {/* SECTION 6: Anexos operacionais vinculados */}
+              {/* SECTION 9: Anexos operacionais vinculados */}
               <div className="mb-10">
                 <h3 className="text-xs font-black font-mono tracking-wider uppercase text-slate-950 border-b-2 border-slate-350 pb-1 mb-2.5">
-                  6. ANEXOS OPERACIONAIS E LAUDOS REGISTRADOS
+                  9. ANEXOS OPERACIONAIS E LAUDOS REGISTRADOS
                 </h3>
                 {(!selectedReport.lista_anexos || selectedReport.lista_anexos.length === 0) ? (
                   <p className="text-xs text-slate-550 italic font-mono border border-slate-200 p-2">Sem anexos de termos cadastrados eletronicamente.</p>
