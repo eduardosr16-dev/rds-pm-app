@@ -41,7 +41,8 @@ import {
   MapPin,
   Clock,
   User,
-  ShieldCheck
+  ShieldCheck,
+  X
 } from 'lucide-react';
 
 interface ReportFormProps {
@@ -104,11 +105,70 @@ export default function ReportForm({ onSubmit, currentUserSession }: ReportFormP
   const [turno, setTurno] = useState(SHIFT_OPTIONS[0]);
   const [horarioServico, setHorarioServico] = useState(SERVICE_HOURS_OPTIONS[1]);
   const [cidade, setCidade] = useState(currentUserSession.cidade || CITITES_OPTIONS[0]);
-  const [comandanteResponsavel, setComandanteResponsavel] = useState(
-    currentUserSession.name || 'Sgt PM Sem Nome'
-  );
+  const [comandanteResponsavel, setComandanteResponsavel] = useState(() => {
+    const baseName = currentUserSession.name || 'Sgt PM Sem Nome';
+    const matricula = currentUserSession.matricula;
+    if (matricula && !baseName.includes('RG PM') && !baseName.includes(matricula)) {
+      return `${baseName} - RG PM ${matricula}`;
+    }
+    return baseName;
+  });
+  const [passaSearchText, setPassaSearchText] = useState(() => {
+    const baseName = currentUserSession.name || 'Sgt PM Sem Nome';
+    const matricula = currentUserSession.matricula;
+    if (matricula && !baseName.includes('RG PM') && !baseName.includes(matricula)) {
+      return `${baseName} - RG PM ${matricula}`;
+    }
+    return baseName;
+  });
+  const [passaDropdownOpen, setPassaDropdownOpen] = useState(false);
+  const [passaShowPMSelector, setPassaShowPMSelector] = useState(false);
+  const [passaFilterRank, setPassaFilterRank] = useState('TODOS');
   const [efetivo, setEfetivo] = useState(2);
   const [viaturasCount, setViaturasCount] = useState(1);
+
+  // Comandante que Recebe o Serviço Autocomplete State
+  const [comandanteRecebe, setComandanteRecebe] = useState('');
+  const [recebeSearchText, setRecebeSearchText] = useState('');
+  const [recebeDropdownOpen, setRecebeDropdownOpen] = useState(false);
+  const [recebeShowPMSelector, setRecebeShowPMSelector] = useState(false);
+  const [recebeFilterRank, setRecebeFilterRank] = useState('TODOS');
+  const [availablePoliciais, setAvailablePoliciais] = useState<PolicialPMMT[]>(LISTA_POLICIAIS_PMMT);
+
+  // Fetch available police officers from Supabase
+  useEffect(() => {
+    const fetchPol = async () => {
+      try {
+        const { supabase, isSupabaseConfigured } = await import('../supabase');
+        if (isSupabaseConfigured() && supabase) {
+          const { data, error } = await supabase
+            .from('policiais')
+            .select('nome_completo, matricula, graduacao')
+            .order('nome_completo', { ascending: true });
+          if (data && data.length > 0) {
+            const mapped: PolicialPMMT[] = data.map((d: any) => ({
+              nome_completo: d.nome_completo,
+              matricula: d.matricula,
+              graduacao: d.graduacao
+            }));
+            setAvailablePoliciais(prev => {
+              const combined = [...mapped, ...LISTA_POLICIAIS_PMMT];
+              const unique = new Map<string, PolicialPMMT>();
+              for (const p of combined) {
+                if (p.matricula) {
+                  unique.set(p.matricula, p);
+                }
+              }
+              return Array.from(unique.values()).sort((a, b) => a.nome_completo.localeCompare(b.nome_completo));
+            });
+          }
+        }
+      } catch (e) {
+        console.error('Erro ao buscar policiais do Supabase:', e);
+      }
+    };
+    fetchPol();
+  }, []);
 
   // Consolidated seizure fields (cached sum)
   const [armas, setArmas] = useState(0);
@@ -297,6 +357,19 @@ export default function ReportForm({ onSubmit, currentUserSession }: ReportFormP
     setOperacao('');
     setTurno(SHIFT_OPTIONS[0]);
     setHorarioServico(SERVICE_HOURS_OPTIONS[1]);
+    const initialPassa = () => {
+      const baseName = currentUserSession.name || 'Sgt PM Sem Nome';
+      const matricula = currentUserSession.matricula;
+      if (matricula && !baseName.includes('RG PM') && !baseName.includes(matricula)) {
+        return `${baseName} - RG PM ${matricula}`;
+      }
+      return baseName;
+    };
+    const defaultPassaVal = initialPassa();
+    setComandanteResponsavel(defaultPassaVal);
+    setPassaSearchText(defaultPassaVal);
+    setComandanteRecebe('');
+    setRecebeSearchText('');
     setEfetivo(2);
     setViaturasCount(1);
     setArmas(0);
@@ -327,6 +400,8 @@ export default function ReportForm({ onSubmit, currentUserSession }: ReportFormP
     setJeViatura('');
     setJePoliciais('');
     setJeObservacoes('');
+    setComandanteRecebe('');
+    setRecebeSearchText('');
   };
 
   // Handlers for Guarnição
@@ -550,6 +625,7 @@ export default function ReportForm({ onSubmit, currentUserSession }: ReportFormP
       horario_servico: horarioServico,
       cidade,
       comandante_responsavel: comandanteResponsavel.trim(),
+      comandante_recebe: comandanteRecebe.trim(),
       efetivo: Number(efetivo),
       viaturas: Number(viaturasCount),
       
@@ -634,7 +710,7 @@ export default function ReportForm({ onSubmit, currentUserSession }: ReportFormP
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {/* Operação */}
-            <div>
+            <div className="md:col-span-2">
               <label htmlFor="input-operacao" className="block text-xs font-mono text-slate-300 uppercase mb-1.5 font-semibold">
                 Nome da Operação *
               </label>
@@ -659,23 +735,6 @@ export default function ReportForm({ onSubmit, currentUserSession }: ReportFormP
                   </button>
                 ))}
               </div>
-            </div>
-
-            {/* Comandante Responsável */}
-            <div>
-              <label htmlFor="input-comandante" className="block text-xs font-mono text-slate-300 uppercase mb-1.5 font-semibold flex items-center gap-1">
-                <User className="h-3.5 w-3.5 text-blue-400" />
-                <span>Comandante Responsável *</span>
-              </label>
-              <input
-                id="input-comandante"
-                type="text"
-                required
-                value={comandanteResponsavel}
-                onChange={(e) => setComandanteResponsavel(e.target.value)}
-                placeholder="Nome e posto do Comandante de Serviço"
-                className="w-full bg-slate-900 border border-slate-800 text-slate-200 text-sm rounded-lg px-3 py-2.5 outline-none focus:border-amber-400"
-              />
             </div>
           </div>
 
@@ -2085,6 +2144,380 @@ export default function ReportForm({ onSubmit, currentUserSession }: ReportFormP
               placeholder="Outras observações destinadas ao Comando da Diretoria Metropolitana..."
               className="w-full bg-slate-900 border border-slate-800 text-slate-200 text-sm rounded-lg p-2.5 outline-none focus:border-amber-400 transition"
             />
+          </div>
+        </div>
+
+        {/* BLOC 7: TRANSIÇÃO E ASSINATURAS DE SERVIÇO */}
+        <div className="bg-slate-950/50 p-5 rounded-xl border border-slate-850/60 space-y-6 font-sans">
+          <div className="text-xs font-mono text-amber-400 uppercase font-semibold flex items-center gap-1.5 border-b border-slate-800/60 pb-2 mb-2">
+            <Users className="h-3.5 w-3.5" />
+            <span>07. Responsabilidade / Transição de Serviço</span>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 relative">
+            
+            {/* COMANDANTE QUE PASSA O SERVIÇO */}
+            <div className="relative">
+              <label htmlFor="input-passa-search" className="block text-xs font-mono text-slate-300 uppercase mb-1.5 font-semibold flex items-center gap-1">
+                <User className="h-3.5 w-3.5 text-blue-400" />
+                <span>Comandante que Passa o Serviço *</span>
+              </label>
+              <div className="relative">
+                <input
+                  id="input-passa-search"
+                  type="text"
+                  required
+                  value={passaSearchText}
+                  onChange={(e) => {
+                    setPassaSearchText(e.target.value);
+                    setComandanteResponsavel(e.target.value);
+                    setPassaDropdownOpen(true);
+                  }}
+                  onFocus={() => setPassaDropdownOpen(true)}
+                  onBlur={() => {
+                    setTimeout(() => setPassaDropdownOpen(false), 200);
+                  }}
+                  placeholder="Pesquise por nome, graduação ou RG..."
+                  className="w-full bg-slate-900 border border-slate-800 text-slate-200 text-sm rounded-lg px-3 py-2.5 outline-none focus:border-amber-400 focus:ring-1 focus:ring-amber-400 transition"
+                  autoComplete="off"
+                />
+                {passaSearchText && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPassaSearchText('');
+                      setComandanteResponsavel('');
+                    }}
+                    className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-200"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                )}
+              </div>
+
+              {passaDropdownOpen && (
+                <div className="absolute z-50 mt-1 w-full max-h-60 overflow-y-auto rounded-lg bg-slate-950 border border-slate-800 shadow-xl divide-y divide-slate-800 text-left">
+                  <div className="p-2 bg-slate-950 flex flex-wrap gap-1 border-b border-slate-900 sticky top-0 z-10">
+                    {['TODOS', 'CAP', 'TEN', 'SGT', 'CB', 'SD'].map((rank) => (
+                      <button
+                        key={rank}
+                        type="button"
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          setPassaFilterRank(rank);
+                        }}
+                        className={`text-[9px] font-mono px-2 py-0.5 rounded border transition cursor-pointer ${
+                          passaFilterRank === rank 
+                            ? 'bg-amber-500 text-slate-950 border-amber-500 font-bold' 
+                            : 'bg-slate-900 text-slate-400 border-slate-800 hover:text-slate-200'
+                        }`}
+                      >
+                        {rank}
+                      </button>
+                    ))}
+                  </div>
+
+                  {(() => {
+                    const filtered = availablePoliciais.filter(p => {
+                      const searchStr = passaSearchText.toLowerCase();
+                      const textMatch = p.nome_completo.toLowerCase().includes(searchStr) ||
+                                        p.matricula.includes(searchStr) ||
+                                        p.graduacao.toLowerCase().includes(searchStr);
+                      
+                      if (passaFilterRank === 'TODOS') return textMatch;
+                      if (passaFilterRank === 'CAP') return textMatch && p.graduacao.startsWith('CAP');
+                      if (passaFilterRank === 'TEN') return textMatch && p.graduacao.includes('TEN');
+                      if (passaFilterRank === 'SGT') return textMatch && p.graduacao.includes('SGT');
+                      if (passaFilterRank === 'CB') return textMatch && p.graduacao.startsWith('CB');
+                      if (passaFilterRank === 'SD') return textMatch && p.graduacao.startsWith('SD');
+                      return textMatch;
+                    });
+
+                    if (filtered.length === 0) {
+                      return (
+                        <div className="p-3 text-xs text-slate-500 italic text-center">
+                          Nenhum policial encontrado. Use o texto livre.
+                        </div>
+                      );
+                    }
+
+                    return filtered.map((pol) => {
+                      const formattedValue = `${pol.graduacao} ${pol.nome_completo} - RG PM ${pol.matricula}`;
+                      return (
+                        <button
+                          key={pol.matricula}
+                          type="button"
+                          onMouseDown={() => {
+                            setComandanteResponsavel(formattedValue);
+                            setPassaSearchText(formattedValue);
+                            setPassaDropdownOpen(false);
+                          }}
+                          className="w-full text-left px-3 py-2 text-xs text-slate-300 hover:bg-slate-900 transition-colors flex flex-col"
+                        >
+                          <span className="font-semibold text-slate-200">{pol.graduacao} {pol.nome_completo}</span>
+                          <span className="text-[10px] text-slate-500 font-mono">Matrícula/RG PM: {pol.matricula}</span>
+                        </button>
+                      );
+                    });
+                  })()}
+                </div>
+              )}
+
+              {/* Interactive list picker */}
+              <div className="mt-1.5 animate-fade-in relative text-left">
+                <button
+                  type="button"
+                  onClick={() => setPassaShowPMSelector(!passaShowPMSelector)}
+                  className="text-[10px] text-amber-500 hover:text-amber-450 font-mono flex items-center gap-1 border border-amber-950/40 px-2 py-0.5 bg-amber-950/10 rounded transition cursor-pointer"
+                >
+                  <Users className="w-2.5 h-2.5 text-amber-500" />
+                  <span>{passaShowPMSelector ? 'Ocultar Lista (-)' : 'Pesquisar/Selecionar do Banco PMMT (+)'}</span>
+                </button>
+
+                {passaShowPMSelector && (
+                  <div className="absolute left-0 mt-1 w-full max-h-48 overflow-y-auto rounded-lg bg-slate-950 border border-slate-800 shadow-xl z-30 p-2 space-y-2 text-left">
+                    <div className="flex flex-wrap gap-1 border-b border-slate-900 pb-1.5">
+                      {['TODOS', 'CAP', 'TEN', 'SGT'].map((rank) => (
+                        <button
+                          key={rank}
+                          type="button"
+                          onClick={() => setPassaFilterRank(rank)}
+                          className={`text-[9px] font-mono px-1.5 py-0.5 rounded border transition cursor-pointer ${
+                            passaFilterRank === rank 
+                              ? 'bg-amber-500 text-slate-950 border-amber-500 font-bold' 
+                              : 'bg-slate-900 text-slate-400 border-slate-800 hover:text-slate-200'
+                          }`}
+                        >
+                          {rank}
+                        </button>
+                      ))}
+                    </div>
+
+                    <div className="max-h-36 overflow-y-auto space-y-1 divide-y divide-slate-900">
+                      {availablePoliciais
+                        .filter(p => {
+                          const isHighRank = p.graduacao.includes('CAP') || p.graduacao.includes('TEN') || p.graduacao.includes('SGT');
+                          if (!isHighRank) return false;
+                          
+                          if (passaFilterRank === 'TODOS') return true;
+                          if (passaFilterRank === 'CAP') return p.graduacao.startsWith('CAP');
+                          if (passaFilterRank === 'TEN') return p.graduacao.includes('TEN');
+                          if (passaFilterRank === 'SGT') return p.graduacao.includes('SGT');
+                          return true;
+                        })
+                        .map((pol) => {
+                          const formattedValue = `${pol.graduacao} ${pol.nome_completo} - RG PM ${pol.matricula}`;
+                          const isSelected = comandanteResponsavel === formattedValue;
+                          return (
+                            <button
+                              key={pol.matricula}
+                              type="button"
+                              onClick={() => {
+                                setComandanteResponsavel(formattedValue);
+                                setPassaSearchText(formattedValue);
+                                setPassaShowPMSelector(false);
+                              }}
+                              className={`w-full flex items-center justify-between p-1 rounded hover:bg-slate-900 text-left transition text-[10px] ${
+                                isSelected 
+                                  ? 'bg-amber-500/10 text-amber-200' 
+                                  : 'text-slate-400'
+                              }`}
+                            >
+                              <div className="truncate">
+                                <span className="font-semibold block text-slate-200">{pol.graduacao} {pol.nome_completo}</span>
+                                <span className="text-[9px] font-mono text-slate-500 block">Matrícula/RG PM: {pol.matricula}</span>
+                              </div>
+                              {isSelected && <span className="text-[10px] text-amber-400 font-bold">✓</span>}
+                            </button>
+                          );
+                        })}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* COMANDANTE QUE RECEBE O SERVIÇO */}
+            <div className="relative font-sans">
+              <label htmlFor="input-recebe-search" className="block text-xs font-mono text-slate-300 uppercase mb-1.5 font-semibold flex items-center gap-1">
+                <ShieldCheck className="h-3.5 w-3.5 text-emerald-400" />
+                <span>Comandante que Recebe o Serviço *</span>
+              </label>
+              <div className="relative">
+                <input
+                  id="input-recebe-search"
+                  type="text"
+                  required
+                  value={recebeSearchText}
+                  onChange={(e) => {
+                    setRecebeSearchText(e.target.value);
+                    setComandanteRecebe(e.target.value);
+                    setRecebeDropdownOpen(true);
+                  }}
+                  onFocus={() => setRecebeDropdownOpen(true)}
+                  onBlur={() => {
+                    setTimeout(() => setRecebeDropdownOpen(false), 200);
+                  }}
+                  placeholder="Pesquise por nome, graduação ou RG..."
+                  className="w-full bg-slate-900 border border-slate-800 text-slate-200 text-sm rounded-lg px-3 py-2.5 outline-none focus:border-amber-400 focus:ring-1 focus:ring-amber-400 transition"
+                  autoComplete="off"
+                />
+                {recebeSearchText && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setRecebeSearchText('');
+                      setComandanteRecebe('');
+                    }}
+                    className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-200"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                )}
+              </div>
+
+              {recebeDropdownOpen && (
+                <div className="absolute z-50 mt-1 w-full max-h-60 overflow-y-auto rounded-lg bg-slate-950 border border-slate-800 shadow-xl divide-y divide-slate-800 text-left">
+                  <div className="p-2 bg-slate-950 flex flex-wrap gap-1 border-b border-slate-900 sticky top-0 z-10">
+                    {['TODOS', 'CAP', 'TEN', 'SGT', 'CB', 'SD'].map((rank) => (
+                      <button
+                        key={rank}
+                        type="button"
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          setRecebeFilterRank(rank);
+                        }}
+                        className={`text-[9px] font-mono px-2 py-0.5 rounded border transition cursor-pointer ${
+                          recebeFilterRank === rank 
+                            ? 'bg-amber-500 text-slate-950 border-amber-500 font-bold' 
+                            : 'bg-slate-900 text-slate-400 border-slate-800 hover:text-slate-200'
+                        }`}
+                      >
+                        {rank}
+                      </button>
+                    ))}
+                  </div>
+
+                  {(() => {
+                    const filtered = availablePoliciais.filter(p => {
+                      const searchStr = recebeSearchText.toLowerCase();
+                      const textMatch = p.nome_completo.toLowerCase().includes(searchStr) ||
+                                        p.matricula.includes(searchStr) ||
+                                        p.graduacao.toLowerCase().includes(searchStr);
+                      
+                      if (recebeFilterRank === 'TODOS') return textMatch;
+                      if (recebeFilterRank === 'CAP') return textMatch && p.graduacao.startsWith('CAP');
+                      if (recebeFilterRank === 'TEN') return textMatch && p.graduacao.includes('TEN');
+                      if (recebeFilterRank === 'SGT') return textMatch && p.graduacao.includes('SGT');
+                      if (recebeFilterRank === 'CB') return textMatch && p.graduacao.startsWith('CB');
+                      if (recebeFilterRank === 'SD') return textMatch && p.graduacao.startsWith('SD');
+                      return textMatch;
+                    });
+
+                    if (filtered.length === 0) {
+                      return (
+                        <div className="p-3 text-xs text-slate-500 italic text-center">
+                          Nenhum policial encontrado. Use o texto livre.
+                        </div>
+                      );
+                    }
+
+                    return filtered.map((pol) => {
+                      const formattedValue = `${pol.graduacao} ${pol.nome_completo} - RG PM ${pol.matricula}`;
+                      return (
+                        <button
+                          key={pol.matricula}
+                          type="button"
+                          onMouseDown={() => {
+                            setComandanteRecebe(formattedValue);
+                            setRecebeSearchText(formattedValue);
+                            setRecebeDropdownOpen(false);
+                          }}
+                          className="w-full text-left px-3 py-2 text-xs text-slate-300 hover:bg-slate-900 transition-colors flex flex-col"
+                        >
+                          <span className="font-semibold text-slate-200">{pol.graduacao} {pol.nome_completo}</span>
+                          <span className="text-[10px] text-slate-500 font-mono">Matrícula/RG PM: {pol.matricula}</span>
+                        </button>
+                      );
+                    });
+                  })()}
+                </div>
+              )}
+
+              {/* Interactive list picker */}
+              <div className="mt-1.5 animate-fade-in relative text-left">
+                <button
+                  type="button"
+                  onClick={() => setRecebeShowPMSelector(!recebeShowPMSelector)}
+                  className="text-[10px] text-amber-500 hover:text-amber-450 font-mono flex items-center gap-1 border border-amber-950/40 px-2 py-0.5 bg-amber-950/10 rounded transition cursor-pointer"
+                >
+                  <Users className="w-2.5 h-2.5 text-amber-500" />
+                  <span>{recebeShowPMSelector ? 'Ocultar Lista (-)' : 'Pesquisar/Selecionar do Banco PMMT (+)'}</span>
+                </button>
+
+                {recebeShowPMSelector && (
+                  <div className="absolute left-0 mt-1 w-full max-h-48 overflow-y-auto rounded-lg bg-slate-950 border border-slate-800 shadow-xl z-30 p-2 space-y-2 text-left">
+                    <div className="flex flex-wrap gap-1 border-b border-slate-900 pb-1.5">
+                      {['TODOS', 'CAP', 'TEN', 'SGT'].map((rank) => (
+                        <button
+                          key={rank}
+                          type="button"
+                          onClick={() => setRecebeFilterRank(rank)}
+                          className={`text-[9px] font-mono px-1.5 py-0.5 rounded border transition cursor-pointer ${
+                            recebeFilterRank === rank 
+                              ? 'bg-amber-500 text-slate-950 border-amber-500 font-bold' 
+                              : 'bg-slate-900 text-slate-400 border-slate-800 hover:text-slate-200'
+                          }`}
+                        >
+                          {rank}
+                        </button>
+                      ))}
+                    </div>
+
+                    <div className="max-h-36 overflow-y-auto space-y-1 divide-y divide-slate-900">
+                      {availablePoliciais
+                        .filter(p => {
+                          const isHighRank = p.graduacao.includes('CAP') || p.graduacao.includes('TEN') || p.graduacao.includes('SGT');
+                          if (!isHighRank) return false;
+                          
+                          if (recebeFilterRank === 'TODOS') return true;
+                          if (recebeFilterRank === 'CAP') return p.graduacao.startsWith('CAP');
+                          if (recebeFilterRank === 'TEN') return p.graduacao.includes('TEN');
+                          if (recebeFilterRank === 'SGT') return p.graduacao.includes('SGT');
+                          return true;
+                        })
+                        .map((pol) => {
+                          const formattedValue = `${pol.graduacao} ${pol.nome_completo} - RG PM ${pol.matricula}`;
+                          const isSelected = comandanteRecebe === formattedValue;
+                          return (
+                            <button
+                              key={pol.matricula}
+                              type="button"
+                              onClick={() => {
+                                setComandanteRecebe(formattedValue);
+                                setRecebeSearchText(formattedValue);
+                                setRecebeShowPMSelector(false);
+                              }}
+                              className={`w-full flex items-center justify-between p-1 rounded hover:bg-slate-900 text-left transition text-[10px] ${
+                                isSelected 
+                                  ? 'bg-amber-500/10 text-amber-200' 
+                                  : 'text-slate-400'
+                              }`}
+                            >
+                              <div className="truncate">
+                                <span className="font-semibold block text-slate-200">{pol.graduacao} {pol.nome_completo}</span>
+                                <span className="text-[9px] font-mono text-slate-500 block">Matrícula/RG PM: {pol.matricula}</span>
+                              </div>
+                              {isSelected && <span className="text-[10px] text-amber-400 font-bold">✓</span>}
+                            </button>
+                          );
+                        })}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
           </div>
         </div>
 

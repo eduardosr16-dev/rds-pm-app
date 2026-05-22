@@ -38,6 +38,7 @@ export const DB_SQL_SCHEMA = `-- ===============================================
 -- =========================================================================
 
 -- DB CLEANUP (Se quiser recomeçar do zero, descomente abaixo)
+-- DROP TABLE IF EXISTS public.usuarios_pm CASCADE;
 -- DROP TABLE IF EXISTS public.integrantes_guarnicao CASCADE;
 -- DROP TABLE IF EXISTS public.guarnicoes CASCADE;
 -- DROP TABLE IF EXISTS public.viaturas CASCADE;
@@ -109,6 +110,7 @@ CREATE TABLE IF NOT EXISTS public.relatorios (
   horario_servico VARCHAR(100) NOT NULL, -- Ex: "18:00 às 06:00"
   cidade VARCHAR(100) NOT NULL DEFAULT 'Cuiabá',
   comandante_responsavel VARCHAR(255) NOT NULL,
+  comandante_recebe VARCHAR(255),
   efetivo INTEGER NOT NULL DEFAULT 1,
   viaturas INTEGER NOT NULL DEFAULT 1,
   
@@ -290,9 +292,9 @@ export const fetchFullReports = async (): Promise<PoliceReport[]> => {
 
   // 1. Fetch main reports
   const { data: rels, error: relsErr } = await supabase
-    .from('relatorios')
-    .select('*')
-    .order('created_at', { ascending: false });
+  .from('relatorios')
+  .select('*')
+  .order('created_at', { ascending: false });
 
   if (relsErr) throw relsErr;
   if (!rels || rels.length === 0) return [];
@@ -339,32 +341,49 @@ export const saveFullReport = async (
   if (!supabase) throw new Error("Supabase is not configured yet.");
 
   // 1. Insert main record first
-  const { data: relData, error: relError } = await supabase
+  const insertPayload: any = {
+    operacao: payload.operacao,
+    turno: payload.turno,
+    horario_servico: payload.horario_servico,
+    cidade: payload.cidade,
+    comandante_responsavel: payload.comandante_responsavel,
+    comandante_recebe: (payload as any).comandante_recebe || null,
+    efetivo: payload.efetivo,
+    viaturas: payload.viaturas,
+    armas_apreendidas: payload.armas_apreendidas,
+    armas_detalhes: payload.armas_detalhes,
+    municoes: payload.municoes,
+    municoes_detalhes: payload.municoes_detalhes,
+    drogas_peso: payload.drogas_peso,
+    drogas_detalhes: payload.drogas_detalhes,
+    valores: payload.valores,
+    observacoes: payload.observacoes,
+    ocorrencias: payload.ocorrencias,
+    user_id: userId || null,
+    user_email: userEmail || 'Central RDS'
+  };
+
+  let { data: relData, error: relError } = await supabase
     .from('relatorios')
-    .insert([{
-      operacao: payload.operacao,
-      turno: payload.turno,
-      horario_servico: payload.horario_servico,
-      cidade: payload.cidade,
-      comandante_responsavel: payload.comandante_responsavel,
-      efetivo: payload.efetivo,
-      viaturas: payload.viaturas,
-      armas_apreendidas: payload.armas_apreendidas,
-      armas_detalhes: payload.armas_detalhes,
-      municoes: payload.municoes,
-      municoes_detalhes: payload.municoes_detalhes,
-      drogas_peso: payload.drogas_peso,
-      drogas_detalhes: payload.drogas_detalhes,
-      valores: payload.valores,
-      observacoes: payload.observacoes,
-      ocorrencias: payload.ocorrencias,
-      user_id: userId || null,
-      user_email: userEmail || 'Central RDS'
-    }])
+    .insert([insertPayload])
     .select();
 
+  if (relError && (relError.message?.includes('comandante_recebe') || relError.code === '42703')) {
+    console.warn("A coluna 'comandante_recebe' nao existe no banco de dados. Tentando salvar sem ela para manter compatibilidade...");
+    delete insertPayload.comandante_recebe;
+    if ((payload as any).comandante_recebe) {
+      insertPayload.observacoes = `[RECEBE SERVIÇO: ${(payload as any).comandante_recebe}] ` + (insertPayload.observacoes || '');
+    }
+    const retryResult = await supabase
+      .from('relatorios')
+      .insert([insertPayload])
+      .select();
+    relData = retryResult.data;
+    relError = retryResult.error;
+  }
+
   if (relError) throw relError;
-  if (!relData || relData.length === 0) throw new Error("Falha ao registrar relatório (ID não retornado).");
+  if (!relData || relData.length === 0) throw new Error("Falha ao registrar relatorio (ID nao retornado).");
 
   const newReportId = relData[0].id;
 

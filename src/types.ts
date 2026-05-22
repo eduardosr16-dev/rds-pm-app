@@ -71,6 +71,7 @@ export interface PoliceReport {
   horario_servico: string;           // Horário de Serviço (Ex: 07:00 às 19:00)
   cidade: string;                    // Cidade do policiamento (Ex: Cuiabá)
   comandante_responsavel: string;    // Nome do Oficial/Sargento Comandante
+  comandante_recebe?: string;        // Nome post/graduação e RG do Comandante que recebe
 
   // Efetivo e Viaturas Gerais
   efetivo: number;

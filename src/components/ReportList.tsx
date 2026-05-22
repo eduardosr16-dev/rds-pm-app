@@ -45,7 +45,7 @@ interface ReportListProps {
 export default function ReportList({ reports, onDelete, currentUserEmail, onNavigateToForm }: ReportListProps) {
   // Mobile and interactive state tabs
   // 'dashboard' | 'records'
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'records'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'records'>('records');
   
   // Search & Filtering States
   const [searchTerm, setSearchTerm] = useState('');
@@ -1064,10 +1064,25 @@ export default function ReportList({ reports, onDelete, currentUserEmail, onNavi
                             e.stopPropagation();
                             setSelectedReport(report);
                           }}
-                          className="text-xs font-mono font-semibold text-blue-400 hover:text-blue-300 transition-colors flex items-center gap-1 bg-slate-950 border border-slate-800/80 px-2.5 py-1.5 rounded"
+                          className="text-xs font-mono font-semibold text-blue-400 hover:text-blue-300 transition-colors flex items-center gap-1 bg-slate-950 border border-slate-800/80 px-2.5 py-1.5 rounded hover:bg-slate-850"
                         >
                           <Eye className="h-3.5 w-3.5" />
                           Visualizar RDS
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSelectedReport(report);
+                            setTimeout(() => {
+                              window.print();
+                            }, 200);
+                          }}
+                          className="text-xs font-mono font-semibold text-emerald-405 hover:text-emerald-300 transition-colors flex items-center gap-1 bg-slate-950 border border-slate-800/80 px-2.5 py-1.5 rounded hover:bg-slate-850"
+                        >
+                          <Printer className="h-3.5 w-3.5 text-emerald-400" />
+                          <span>Exportar PDF</span>
                         </button>
 
                         {(currentUserEmail === report.user_email || report.id.startsWith('report-local-')) && (
@@ -1493,11 +1508,17 @@ export default function ReportList({ reports, onDelete, currentUserEmail, onNavi
                 )}
 
                 {/* Administrative observations */}
-                {selectedReport.observacoes && (
-                  <div className="mt-4 border-l-4 border-slate-400 pl-3 py-1 text-xs text-slate-700 italic">
-                    <strong>Informações adicionais do Comando:</strong> {selectedReport.observacoes}
-                  </div>
-                )}
+                {(() => {
+                  if (!selectedReport.observacoes) return null;
+                  // Strip the '[RECEBE SERVIÇO: ...]' pattern from the displayed text
+                  const cleanedObs = selectedReport.observacoes.replace(/\[RECEBE SERVIÇO:\s*[^\]]+\]\s*/g, '').trim();
+                  if (!cleanedObs) return null;
+                  return (
+                    <div className="mt-4 border-l-4 border-slate-400 pl-3 py-1 text-xs text-slate-700 italic">
+                      <strong>Informações adicionais do Comando:</strong> {cleanedObs}
+                    </div>
+                  );
+                })()}
               </div>
 
               {/* Signature area */}
@@ -1505,14 +1526,28 @@ export default function ReportList({ reports, onDelete, currentUserEmail, onNavi
                 <div className="space-y-1">
                   <div className="w-48 border-b border-slate-400 mx-auto mt-6" />
                   <span className="block font-bold text-slate-900 uppercase">
-                    {selectedReport.comandante_responsavel || 'Cmdte do Policiamento'}
+                    {selectedReport.comandante_responsavel || '2º SGT PM EDUARDO SILVA RODRIGUES - RG PM 883.694'}
                   </span>
-                  <span className="block text-[9px] text-slate-600">Comandante de Serviço Geral / Responsável</span>
+                  <span className="block text-[9px] text-slate-600 font-mono font-semibold">COMANDANTE QUE PASSA O SERVIÇO</span>
                 </div>
                 <div className="space-y-1">
                   <div className="w-48 border-b border-slate-400 mx-auto mt-6" />
-                  <span className="block font-bold text-slate-900 font-sans">DIRETORIA METROPOLITANA • PMMT</span>
-                  <span className="block text-[9px] text-slate-600 font-sans">Chancelado Eletronicamente via Banco Supabase</span>
+                  <span className="block font-bold text-slate-900 uppercase">
+                    {(() => {
+                      if (selectedReport.comandante_recebe) return selectedReport.comandante_recebe;
+                      
+                      // Check in observations fallback
+                      if (selectedReport.observacoes && selectedReport.observacoes.includes('[RECEBE SERVIÇO: ')) {
+                        const match = selectedReport.observacoes.match(/\[RECEBE SERVIÇO:\s*([^\]]+)\]/);
+                        if (match && match[1]) {
+                          return match[1].trim();
+                        }
+                      }
+                      
+                      return '2º SGT PM DOUGLAS SOUZA PORTO - RG PM 887.198'; // Default Fallback example if undefined
+                    })()}
+                  </span>
+                  <span className="block text-[9px] text-slate-600 font-mono font-semibold">COMANDANTE QUE RECEBE O SERVIÇO</span>
                 </div>
               </div>
             </div>
@@ -1530,14 +1565,15 @@ export default function ReportList({ reports, onDelete, currentUserEmail, onNavi
       {/* PRINT STYLING INJECTED VIA RAW CSS ELEMENT */}
       <style>{`
         @media print {
-          /* Hide everything except printable report section */
-          body * {
+          /* Hide everything except printable report section, only if report paper is present */
+          body:has(#printable-report-paper) * {
             visibility: hidden !important;
           }
-          #printable-report-paper, #printable-report-paper * {
+          body:has(#printable-report-paper) #printable-report-paper,
+          body:has(#printable-report-paper) #printable-report-paper * {
             visibility: visible !important;
           }
-          #printable-report-paper {
+          body:has(#printable-report-paper) #printable-report-paper {
             position: absolute !important;
             left: 0 !important;
             top: 0 !important;
@@ -1548,11 +1584,11 @@ export default function ReportList({ reports, onDelete, currentUserEmail, onNavi
             color: black !important;
             font-size: 11px !important;
           }
-          #document-modal-overlay {
+          body:has(#printable-report-paper) #document-modal-overlay {
             background: white !important;
             position: absolute !important;
           }
-          #document-modal-card {
+          body:has(#printable-report-paper) #document-modal-card {
             border: none !important;
             box-shadow: none !important;
             background: white !important;
