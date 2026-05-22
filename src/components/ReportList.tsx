@@ -113,17 +113,22 @@ export default function ReportList({ reports, onDelete, currentUserEmail, onNavi
 
   // Chronological sort to calculate dynamic sequence numbers
   const sortedChronologically = useMemo(() => {
+    if (!reports || !Array.isArray(reports)) return [];
     return [...reports].sort((a, b) => {
-      return a.created_at.localeCompare(b.created_at);
+      const dateA = a?.created_at || '';
+      const dateB = b?.created_at || '';
+      return dateA.localeCompare(dateB);
     });
   }, [reports]);
 
   // Dynamic automatic document numbering builder
   const getReportDocNumber = (report: PoliceReport) => {
-    const idx = sortedChronologically.findIndex(r => r.id === report.id);
+    if (!report) return 'Nº 001/2026';
+    const reportIdStr = String(report.id || '');
+    const idx = sortedChronologically.findIndex(r => String(r?.id || '') === reportIdStr);
     const seqNum = idx !== -1 ? idx + 1 : 1;
     const formattedSeq = String(seqNum).padStart(3, '0');
-    const dateObj = new Date(report.created_at);
+    const dateObj = new Date(report?.created_at || '');
     const year = isNaN(dateObj.getTime()) ? new Date().getFullYear() : dateObj.getFullYear();
     return `Nº ${formattedSeq}/${year}`;
   };
@@ -155,28 +160,39 @@ export default function ReportList({ reports, onDelete, currentUserEmail, onNavi
 
   // Main reports filtering algorithm
   const filteredReports = useMemo(() => {
+    if (!reports || !Array.isArray(reports)) return [];
     return reports.filter(r => {
+      if (!r) return false;
+      const rOperacao = r.operacao || '';
+      const rOcorrencias = r.ocorrencias || '';
+      const rUserEmail = r.user_email || '';
+      const rArmasDetalhes = r.armas_detalhes || '';
+      const rDrogasDetalhes = r.drogas_detalhes || '';
+      const rCidade = r.cidade || '';
+      const rComandante = r.comandante_responsavel || '';
+      const rTurno = r.turno || '';
+
       // 1. Term Search matching
       const matchesSearch = 
-        r.operacao.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        r.ocorrencias.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (r.user_email && r.user_email.toLowerCase().includes(searchTerm.toLowerCase())) ||
-        (r.armas_detalhes && r.armas_detalhes.toLowerCase().includes(searchTerm.toLowerCase())) ||
-        (r.drogas_detalhes && r.drogas_detalhes.toLowerCase().includes(searchTerm.toLowerCase())) ||
-        (r.cidade && r.cidade.toLowerCase().includes(searchTerm.toLowerCase())) ||
-        (r.comandante_responsavel && r.comandante_responsavel.toLowerCase().includes(searchTerm.toLowerCase()));
+        rOperacao.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        rOcorrencias.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        rUserEmail.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        rArmasDetalhes.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        rDrogasDetalhes.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        rCidade.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        rComandante.toLowerCase().includes(searchTerm.toLowerCase());
 
       // 2. Shift selection (1º Turno includes 1º, Diurno, Matutino, Vespertino; 2º Turno includes 2º, Noturno)
       const matchesShift = selectedShift === 'Todos' || 
-        (selectedShift === '1º Turno' && (r.turno.includes('1º') || r.turno.toLowerCase().includes('matutino') || r.turno.toLowerCase().includes('vespertino') || r.turno.toLowerCase().includes('diurno'))) ||
-        (selectedShift === '2º Turno' && (r.turno.includes('2º') || r.turno.toLowerCase().includes('noturno') || r.turno.toLowerCase().includes('segundo')));
+        (selectedShift === '1º Turno' && (rTurno.includes('1º') || rTurno.toLowerCase().includes('matutino') || rTurno.toLowerCase().includes('vespertino') || rTurno.toLowerCase().includes('diurno'))) ||
+        (selectedShift === '2º Turno' && (rTurno.includes('2º') || rTurno.toLowerCase().includes('noturno') || rTurno.toLowerCase().includes('segundo')));
       
       // 3. Seizure focus checkbox
-      const hasSeizures = r.armas_apreendidas > 0 || r.municoes > 0 || r.drogas_peso > 0 || r.valores > 0;
+      const hasSeizures = (r.armas_apreendidas || 0) > 0 || (r.municoes || 0) > 0 || (r.drogas_peso || 0) > 0 || (r.valores || 0) > 0;
       const matchesSeizures = !onlyWithSeizures || hasSeizures;
 
       // 4. Custom Date Range matching YYYY-MM-DD
-      const reportDateStr = r.created_at.split('T')[0];
+      const reportDateStr = (r.created_at || '').split('T')[0] || '';
       const matchesDateStart = !dateStart || reportDateStr >= dateStart;
       const matchesDateEnd = !dateEnd || reportDateStr <= dateEnd;
 
@@ -239,6 +255,7 @@ export default function ReportList({ reports, onDelete, currentUserEmail, onNavi
     let kmTravelled = 0;
 
     filteredReports.forEach(r => {
+      if (!r) return;
       weapons += r.armas_apreendidas || 0;
       ammo += r.municoes || 0;
       drugs += r.drogas_peso || 0;
@@ -247,7 +264,7 @@ export default function ReportList({ reports, onDelete, currentUserEmail, onNavi
       actualOfficers += r.efetivo || 0;
 
       // Count shift distribution
-      const shiftName = r.turno.toLowerCase();
+      const shiftName = (r.turno || '').toLowerCase();
       if (shiftName.includes('2º') || shiftName.includes('segundo') || shiftName.includes('noturno')) {
         shiftMap.Segundo += 1;
       } else if (shiftName.includes('1º') || shiftName.includes('primeiro') || shiftName.includes('diurno') || shiftName.includes('matutino') || shiftName.includes('vespertino')) {
@@ -311,7 +328,7 @@ export default function ReportList({ reports, onDelete, currentUserEmail, onNavi
       setDeletingId(id);
       try {
         await onDelete(id);
-        if (selectedReport?.id === id) {
+        if (selectedReport && String(selectedReport.id) === String(id)) {
           setSelectedReport(null);
         }
       } catch (err) {
@@ -966,12 +983,14 @@ export default function ReportList({ reports, onDelete, currentUserEmail, onNavi
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4" id="reports-grid-list-view">
               {filteredReports.map((report) => {
+                if (!report) return null;
+                const reportIdStr = String(report.id || '');
                 const reportCidade = report.cidade || 'Cuiabá';
                 const reportComandante = report.comandante_responsavel || 'Cmdte Geral';
 
                 return (
                   <div
-                    key={report.id}
+                    key={reportIdStr}
                     onClick={() => setSelectedReport(report)}
                     className="bg-slate-900 border border-slate-850 hover:border-slate-700/80 rounded-xl p-5 shadow-md flex flex-col justify-between cursor-pointer transition-all hover:translate-y-[-2px] hover:shadow-lg group"
                   >
@@ -1085,11 +1104,11 @@ export default function ReportList({ reports, onDelete, currentUserEmail, onNavi
                           <span>Exportar PDF</span>
                         </button>
 
-                        {(currentUserEmail === report.user_email || report.id.startsWith('report-local-')) && (
+                        {(currentUserEmail && report.user_email && currentUserEmail === report.user_email || reportIdStr.startsWith('report-local-')) && (
                           <button
                             type="button"
-                            disabled={deletingId === report.id}
-                            onClick={(e) => handleDeleteClick(e, report.id)}
+                            disabled={String(deletingId || '') === reportIdStr}
+                            onClick={(e) => handleDeleteClick(e, reportIdStr)}
                             className="text-xs font-mono font-semibold text-red-400 hover:text-red-300 transition-colors flex items-center gap-1 bg-slate-950 border border-slate-800/80 px-2.5 py-1.5 rounded hover:bg-red-950/20"
                           >
                             <Trash2 className="h-3 w-3" />

@@ -40,38 +40,57 @@ export default function App() {
     let rawLocalSession: string | null = null;
     try {
       rawLocalSession = localStorage.getItem('rdspm_session');
-    } catch (e) {
-      console.warn('Erro ao ler localStorage', e);
+    } catch (e: any) {
+      console.warn('[RDS-PM] Erro ao ler localStorage:', e?.message || e);
     }
 
     if (rawLocalSession) {
       try {
         const parsed = JSON.parse(rawLocalSession);
-        if (parsed) {
-          setUser(parsed);
-          loadReports(parsed);
+        if (parsed && typeof parsed === 'object') {
+          console.log(`[RDS-PM] Tentando restaurar sessão para: RG=${parsed.matricula || 'N/A'}, Nome=${parsed.name || 'N/A'}`);
+          
+          const validatedSession: UserSession = {
+            id: parsed.id || 'temp-id',
+            email: parsed.email || `${parsed.matricula || 'militar'}@pm.mt.gov.br`,
+            name: parsed.name || 'USUÁRIO',
+            role: parsed.role || 'POLICIAL MILITAR',
+            matricula: parsed.matricula || '000.000',
+            pelotao: parsed.pelotao || '',
+            cidade: parsed.cidade || 'Cuiabá',
+            isDemo: parsed.isDemo === undefined ? true : !!parsed.isDemo
+          };
+          setUser(validatedSession);
+          loadReports(validatedSession);
+        } else {
+          console.warn('[RDS-PM] Sessão gravada no localStorage é ínfima ou inválida.');
+          localStorage.removeItem('rdspm_session');
         }
-      } catch {
-        localStorage.removeItem('rdspm_session');
+      } catch (err: any) {
+        console.error('[RDS-PM] Incident de JSON parse no cache de sessão:', err?.message || err);
+        try {
+          localStorage.removeItem('rdspm_session');
+        } catch {}
       }
     }
   }, []);
 
   const loadReports = async (session: UserSession) => {
     setSyncing(true);
-    if (session.isDemo || !isConfigured) {
+    const safeSession = session || { isDemo: true };
+    if (safeSession.isDemo || !isConfigured) {
       // Local Database flow
       const data = LocalDb.getReports();
-      setReports(data);
+      setReports(data || []);
       setSyncing(false);
     } else {
       // Supabase fetch flow
       try {
         const fullReports = await fetchFullReports();
-        setReports(fullReports);
-      } catch (err) {
-        console.error('Falha de sincronização Supabase, usando banco local:', err);
-        setReports(LocalDb.getReports());
+        setReports(fullReports || []);
+      } catch (err: any) {
+        console.error('[RDS-PM] Falha de sincronização Supabase, usando banco local:', err?.message || err);
+        setReports(LocalDb.getReports() || []);
       } finally {
         setSyncing(false);
       }
@@ -79,9 +98,30 @@ export default function App() {
   };
 
   const handleLoginSuccess = (session: UserSession) => {
-    setUser(session);
-    localStorage.setItem('rdspm_session', JSON.stringify(session));
-    loadReports(session);
+    if (!session || typeof session !== 'object') {
+      console.error('[RDS-PM] Dados de autenticação nulos ou incorretos:', session);
+      return;
+    }
+    const validatedSession: UserSession = {
+      id: session.id || 'temp-id',
+      email: session.email || `${session.matricula || 'militar'}@pm.mt.gov.br`,
+      name: session.name || 'USUÁRIO',
+      role: session.role || 'POLICIAL MILITAR',
+      matricula: session.matricula || '000.000',
+      pelotao: session.pelotao || '',
+      cidade: session.cidade || 'Cuiabá',
+      isDemo: session.isDemo === undefined ? true : !!session.isDemo
+    };
+    
+    console.log(`[RDS-PM] Login efetuado com sucesso: ID=${validatedSession.id}, Nome=${validatedSession.name}, Graduação/Role=${validatedSession.role}`);
+    
+    setUser(validatedSession);
+    try {
+      localStorage.setItem('rdspm_session', JSON.stringify(validatedSession));
+    } catch (e: any) {
+      console.error('[RDS-PM] Falha ao sincronizar dados de sessão no cache:', e?.message || e);
+    }
+    loadReports(validatedSession);
     setCurrentTab('list'); // Redirect directly to visualizer dashboard
   };
 
@@ -112,13 +152,20 @@ export default function App() {
     }
   };
 
-  const handleDeleteReport = async (id: string): Promise<boolean> => {
+  const handleDeleteReport = async (id: string | number): Promise<boolean> => {
     if (!user) return false;
 
-    if (user.isDemo || !isConfigured || id.startsWith('report-local-')) {
+    if (!id && id !== 0) {
+      console.warn('[RDS-PM] Tentativa de exclusão com ID nulo ou indefinido.');
+      return false;
+    }
+
+    const idStr = String(id);
+
+    if (user.isDemo || !isConfigured || idStr.startsWith('report-local-')) {
       // Offline deletion
-      LocalDb.deleteReport(id);
-      setReports((prev) => prev.filter((r) => r.id !== id));
+      LocalDb.deleteReport(idStr);
+      setReports((prev) => prev.filter((r) => String(r?.id || '') !== idStr));
       return true;
     } else {
       // Supabase deletion
@@ -130,7 +177,7 @@ export default function App() {
 
         if (error) throw error;
 
-        setReports((prev) => prev.filter((r) => r.id !== id));
+        setReports((prev) => prev.filter((r) => String(r?.id || '') !== idStr));
         return true;
       } catch (err) {
         console.error('Falha ao deletar relatório do Supabase:', err);
@@ -218,7 +265,7 @@ export default function App() {
             <div className="hidden md:flex items-center gap-4">
               <div className="text-right">
                 <span className="block text-xs font-bold font-sans text-slate-200">
-                  {user.name}
+                  {user?.name || 'Militar de Serviço'}
                 </span>
                 <span className="block text-[10px] font-mono text-amber-500 font-semibold uppercase">
                   Policial Militar Conectado
@@ -258,7 +305,7 @@ export default function App() {
                 <User className="h-4.5 w-4.5 text-blue-400" />
               </div>
               <div>
-                <span className="block text-xs font-extrabold text-white">{user.name}</span>
+                <span className="block text-xs font-extrabold text-white">{user?.name || 'Militar de Serviço'}</span>
                 <span className="block text-[10px] font-mono text-emerald-400 font-semibold uppercase">PMMT Oficial</span>
               </div>
             </div>
@@ -326,11 +373,11 @@ export default function App() {
           
           {/* Left status badge */}
           <div className="flex items-center gap-2">
-            <Radio className={`h-3 w-3 animate-ping ${user.isDemo ? 'text-amber-500' : 'text-emerald-500'}`} />
+            <Radio className={`h-3 w-3 animate-ping ${(!user || user.isDemo) ? 'text-amber-500' : 'text-emerald-500'}`} />
             <span>Perfil: </span>
-            <span className="font-bold text-slate-200">{user.role || 'Oficial'}</span>
+            <span className="font-bold text-slate-200">{user?.role || 'Policial Militar'}</span>
             <span className="text-slate-500">•</span>
-            {user.isDemo ? (
+            {(!user || user.isDemo) ? (
               <span className="text-amber-400 font-mono flex items-center gap-1">
                 <Lock className="h-3 w-3" />
                 BANCO LOCAL TEMPORÁRIO (DEMO)
@@ -353,10 +400,10 @@ export default function App() {
             ) : (
               <button 
                 type="button" 
-                onClick={() => loadReports(user)} 
+                onClick={() => user && loadReports(user)} 
                 className="text-slate-4 w-auto hover:text-white underline text-[11px] font-semibold flex items-center gap-1 cursor-pointer"
               >
-                Sincronizar Arquivos ({reports.length})
+                Sincronizar Arquivos ({reports?.length || 0})
               </button>
             )}
           </div>
@@ -401,9 +448,9 @@ export default function App() {
             </div>
 
             <ReportList 
-              reports={reports} 
+              reports={reports || []} 
               onDelete={handleDeleteReport} 
-              currentUserEmail={user.email}
+              currentUserEmail={user?.email || 'militar@pm.mt.gov.br'}
               onNavigateToForm={() => setCurrentTab('form')}
             />
           </div>

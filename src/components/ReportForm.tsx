@@ -104,18 +104,18 @@ export default function ReportForm({ onSubmit, currentUserSession }: ReportFormP
   const [operacao, setOperacao] = useState('');
   const [turno, setTurno] = useState(SHIFT_OPTIONS[0]);
   const [horarioServico, setHorarioServico] = useState(SERVICE_HOURS_OPTIONS[1]);
-  const [cidade, setCidade] = useState(currentUserSession.cidade || CITITES_OPTIONS[0]);
+  const [cidade, setCidade] = useState((currentUserSession && currentUserSession.cidade) || CITITES_OPTIONS[0]);
   const [comandanteResponsavel, setComandanteResponsavel] = useState(() => {
-    const baseName = currentUserSession.name || 'Sgt PM Sem Nome';
-    const matricula = currentUserSession.matricula;
+    const baseName = (currentUserSession && currentUserSession.name) || 'Sgt PM Sem Nome';
+    const matricula = (currentUserSession && currentUserSession.matricula) || '';
     if (matricula && !baseName.includes('RG PM') && !baseName.includes(matricula)) {
       return `${baseName} - RG PM ${matricula}`;
     }
     return baseName;
   });
   const [passaSearchText, setPassaSearchText] = useState(() => {
-    const baseName = currentUserSession.name || 'Sgt PM Sem Nome';
-    const matricula = currentUserSession.matricula;
+    const baseName = (currentUserSession && currentUserSession.name) || 'Sgt PM Sem Nome';
+    const matricula = (currentUserSession && currentUserSession.matricula) || '';
     if (matricula && !baseName.includes('RG PM') && !baseName.includes(matricula)) {
       return `${baseName} - RG PM ${matricula}`;
     }
@@ -358,8 +358,8 @@ export default function ReportForm({ onSubmit, currentUserSession }: ReportFormP
     setTurno(SHIFT_OPTIONS[0]);
     setHorarioServico(SERVICE_HOURS_OPTIONS[1]);
     const initialPassa = () => {
-      const baseName = currentUserSession.name || 'Sgt PM Sem Nome';
-      const matricula = currentUserSession.matricula;
+      const baseName = (currentUserSession && currentUserSession.name) || 'Sgt PM Sem Nome';
+      const matricula = (currentUserSession && currentUserSession.matricula) || '';
       if (matricula && !baseName.includes('RG PM') && !baseName.includes(matricula)) {
         return `${baseName} - RG PM ${matricula}`;
       }
@@ -619,7 +619,7 @@ export default function ReportForm({ onSubmit, currentUserSession }: ReportFormP
     setSubmitting(true);
 
     const reportPayload: Omit<PoliceReport, 'id' | 'created_at'> = {
-      user_email: currentUserSession.email,
+      user_email: (currentUserSession && currentUserSession.email) || 'militar@pm.mt.gov.br',
       operacao: operacao.trim(),
       turno,
       horario_servico: horarioServico,

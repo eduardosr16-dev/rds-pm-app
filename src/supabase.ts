@@ -524,9 +524,10 @@ export const LocalDb = {
     return newReport;
   },
 
-  deleteReport(id: string): boolean {
+  deleteReport(id: string | number): boolean {
     const reports = this.getReports();
-    const filtered = reports.filter(r => r.id !== id);
+    const idStr = String(id || '');
+    const filtered = reports.filter(r => String(r?.id || '') !== idStr);
     localStorage.setItem('rdspm_local_reports', JSON.stringify(filtered));
     return true;
   }
