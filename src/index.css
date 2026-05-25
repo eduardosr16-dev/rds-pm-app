@@ -1,4 +1,11 @@
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:wght@300;400;500;600;700;800&family=Inter:wght@300;400;500;600;700&display=swap');
 @import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Space Grotesk", sans-serif;
+  --font-mono: "JetBrains Mono", monospace;
+}
 
 @layer utilities {
   @keyframes fadeIn {
@@ -18,12 +25,21 @@
     75% { transform: translateX(4px); }
   }
 
+  @keyframes scanline {
+    0% { transform: translateY(-100%); }
+    100% { transform: translateY(100%); }
+  }
+
   .animate-fadeIn {
     animation: fadeIn 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
   }
 
   .animate-shake {
     animation: shake 0.2s ease-in-out;
+  }
+
+  .animate-scanline {
+    animation: scanline 3s linear infinite;
   }
 }
 

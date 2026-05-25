@@ -1,6 +1,8 @@
 {
-  "name": "RDS-PM",
+  "name": "RDS-PM BACKUP ESTÁVEL 25-05",
   "description": "Sistema de Relatório Diário de Serviço da Polícia Militar",
   "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
 }

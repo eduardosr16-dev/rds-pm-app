@@ -294,8 +294,12 @@ export default function ReportList({ reports, onDelete, currentUserEmail, onNavi
       // Accrued KM
       if (r.lista_viaturas) {
         r.lista_viaturas.forEach(v => {
-          if (v.km_final && v.km_inicial && v.km_final >= v.km_inicial) {
-            kmTravelled += (v.km_final - v.km_inicial);
+          const anyV = v as any;
+          if (anyV.km_final && anyV.km_inicial && anyV.km_final >= anyV.km_inicial) {
+            kmTravelled += (anyV.km_final - anyV.km_inicial);
+          } else if (anyV.km_abastecimento) {
+            // Include km of fuel supply in the general database totals
+            kmTravelled += anyV.km_abastecimento;
           }
         });
       }
@@ -1369,9 +1373,9 @@ export default function ReportList({ reports, onDelete, currentUserEmail, onNavi
               </div>
 
               {/* SECTION 5: Viaturas Empenhadas */}
-              <div className="mb-5">
+              <div className="mb-5" id="report-view-viaturas">
                 <h3 className="text-xs font-black font-mono tracking-wider uppercase text-slate-950 border-b-2 border-slate-350 pb-1 mb-2.5">
-                  5. VIATURAS EMPENHADAS E CONTROLE DE QUILOMETRAGEM
+                  5. VIATURAS EMPENHADAS E CONTROLE DE ABASTECIMENTO
                 </h3>
                 
                 {(!selectedReport.lista_viaturas || !Array.isArray(selectedReport.lista_viaturas) || selectedReport.lista_viaturas.length === 0) ? (
@@ -1383,26 +1387,28 @@ export default function ReportList({ reports, onDelete, currentUserEmail, onNavi
                     <table className="w-full text-left text-xs border-collapse">
                       <thead>
                         <tr className="bg-slate-100 border-b border-slate-300 text-slate-750 font-mono text-[10px] font-black uppercase">
-                          <th className="p-2">Prefixo</th>
-                          <th className="p-2">Modelo do Veículo</th>
-                          <th className="p-2">Placa Oficial</th>
-                          <th className="p-2 text-center">KM Inicial</th>
-                          <th className="p-2 text-center">KM Final</th>
-                          <th className="p-2 text-center">KM Percorridos</th>
+                          <th className="p-2">Viatura</th>
+                          <th className="p-2">Placa</th>
+                          <th className="p-2 text-center">KM Abastecimento</th>
+                          <th className="p-2 text-center">Litros</th>
+                          <th className="p-2 text-center">Saldo</th>
+                          <th className="p-2 text-center">Valor Abastecido</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-250 font-mono text-slate-900">
-                        {(selectedReport.lista_viaturas || []).map((vtr, i) => {
-                          const kmDiff = (vtr.km_final && vtr.km_inicial) ? (vtr.km_final - vtr.km_inicial) : null;
+                        {selectedReport.lista_viaturas.map((vtr, i) => {
                           return (
                             <tr key={i} className="hover:bg-slate-50">
-                              <td className="p-2 font-bold">{vtr.prefixo}</td>
-                              <td className="p-2 text-slate-700">{vtr.modelo}</td>
-                              <td className="p-2">{vtr.placa || '-'}</td>
-                              <td className="p-2 text-center">{vtr.km_inicial ?? '-'}</td>
-                              <td className="p-2 text-center">{vtr.km_final ?? '-'}</td>
-                              <td className="p-2 text-center font-bold text-slate-950">
-                                {kmDiff !== null ? `${kmDiff} km` : '-'}
+                              <td className="p-2 font-bold text-slate-900">{vtr.modelo}</td>
+                              <td className="p-2 font-bold text-blue-900">{vtr.placa}</td>
+                              <td className="p-2 text-center">{vtr.km_abastecimento ?? '-'}</td>
+                              <td className="p-2 text-center">{vtr.litros ? `${vtr.litros} L` : '-'}</td>
+                              <td className="p-2 text-center">{vtr.saldo ? `${vtr.saldo} L` : '-'}</td>
+                              <td className="p-2 text-center font-bold text-emerald-700">
+                                {vtr.valor_abastecido !== undefined 
+                                  ? `R$ ${Number(vtr.valor_abastecido).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` 
+                                  : '-'
+                                }
                               </td>
                             </tr>
                           );
