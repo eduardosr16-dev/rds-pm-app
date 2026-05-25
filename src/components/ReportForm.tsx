@@ -3,47 +3,29 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
-import { 
-  PoliceReport, 
-  Viatura, 
-  OcorrenciaItem, 
-  AnexoItem, 
+import React, { useState, useEffect, useMemo } from 'react';
+import {
+  PoliceReport,
+  Viatura,
+  OcorrenciaItem,
+  AnexoItem,
   UserSession,
   GuarnicaoItem,
   AtividadeDelegadaItem,
-  JornadaExtraordinariaItem
+  JornadaExtraordinariaItem,
+  CatalogoViatura,
+  PatrulheiroItem,
+  PatrulheiroAtividadeItem,
+  PatrulheiroJornadaItem
 } from '../types';
-import { 
-  LISTA_POLICIAIS_PMMT, 
-  OBTER_PESO_PATENTE, 
-  OBTER_NOME_GUERRA_OU_ABREVIADO, 
-  PolicialPMMT 
+import {
+  LISTA_POLICIAIS_PMMT,
+  OBTER_PESO_PATENTE,
+  OBTER_NOME_GUERRA_OU_ABREVIADO,
+  PolicialPMMT
 } from '../data/policiais';
-import { 
-  ShieldAlert, 
-  Calendar, 
-  Users, 
-  Car, 
-  Flame, 
-  CircleAlert, 
-  DollarSign, 
-  FileText, 
-  PlusCircle, 
-  CheckCircle2, 
-  Compass, 
-  AlertTriangle,
-  Trash2,
-  Paperclip,
-  FileSpreadsheet,
-  FileCheck2,
-  FileImage,
-  MapPin,
-  Clock,
-  User,
-  ShieldCheck,
-  X
-} from 'lucide-react';
+import { ShieldAlert, Calendar, Users, Car, Flame, CircleAlert, DollarSign, FileText, CirclePlus as PlusCircle, CircleCheck as CheckCircle2, Compass, TriangleAlert as AlertTriangle, Trash2, Paperclip, FileSpreadsheet, FileCheck2, FileImage, MapPin, Clock, User, ShieldCheck, X, Search, ChevronDown, Check, Star, Fuel, Droplets } from 'lucide-react';
+import { supabase, isSupabaseConfigured } from '../supabase';
 
 interface ReportFormProps {
   onSubmit: (report: Omit<PoliceReport, 'id' | 'created_at'>) => Promise<boolean>;
@@ -182,26 +164,34 @@ export default function ReportForm({ onSubmit, currentUserSession }: ReportFormP
   const [ocorrenciasConsolidadas, setOcorrenciasConsolidadas] = useState('');
 
   // 1. RELATIONAL CHILD TABLE: VIATURAS
-  const [listaViaturas, setListaViaturas] = useState<Viatura[]>([
-    { prefixo: 'VTR-1025', modelo: 'Toyota Hilux GLI', placa: 'OBO-4412', km_inicial: 98110, km_final: 98320 }
-  ]);
+  const [listaViaturas, setListaViaturas] = useState<Viatura[]>([]);
   // Viatura Row Form Fields
-  const [vtrPrefixo, setVtrPrefixo] = useState('');
-  const [vtrModelo, setVtrModelo] = useState('');
-  const [vtrPlaca, setVtrPlaca] = useState('');
+  const [vtrSelected, setVtrSelected] = useState<CatalogoViatura | null>(null);
   const [vtrKmInit, setVtrKmInit] = useState<number | undefined>(undefined);
   const [vtrKmFinal, setVtrKmFinal] = useState<number | undefined>(undefined);
+  const [vtrKmAbastecimento, setVtrKmAbastecimento] = useState<number | undefined>(undefined);
+  const [vtrLitrosAbastecidos, setVtrLitrosAbastecidos] = useState<number | undefined>(undefined);
+  const [vtrValorAbastecimento, setVtrValorAbastecimento] = useState<number | undefined>(undefined);
 
   // 2. RELATIONAL CHILD TABLE: OCORRÊNCIAS
-  const [listaOcorrencias, setListaOcorrencias] = useState<OcorrenciaItem[]>([
-    { natureza_ocorrencia: 'Apreensão de Foragido da Justiça', ocorrencia_bo: 'BO-2026.11024', suspeitos_conduzidos: 1, observacoes: 'Suspeito com mandado em aberto localizado durante patrulhamento.', local_fato: 'Bairro CPA II, Cuiabá' }
-  ]);
+  const [listaOcorrencias, setListaOcorrencias] = useState<OcorrenciaItem[]>([]);
   // Ocorrência Row Form Fields
   const [ocoNatureza, setOcoNatureza] = useState(POPULAR_NATURES[0]);
+  const [ocoTipoRegistro, setOcoTipoRegistro] = useState<'BO' | 'TCO' | 'APREENSAO' | 'PRISAO'>('BO');
   const [ocoBo, setOcoBo] = useState('');
   const [ocoSuspeitos, setOcoSuspeitos] = useState(0);
   const [ocoObs, setOcoObs] = useState('');
   const [ocoLocal, setOcoLocal] = useState('');
+  // Auto-productivity fields for occurrence
+  const [ocoArmas, setOcoArmas] = useState(0);
+  const [ocoMunicoes, setOcoMunicoes] = useState(0);
+  const [ocoDrogas, setOcoDrogas] = useState(0);
+  const [ocoValores, setOcoValores] = useState(0);
+  const [ocoVeiculosRecuperados, setOcoVeiculosRecuperados] = useState(0);
+  const [ocoVeiculosApreendidos, setOcoVeiculosApreendidos] = useState(0);
+  const [ocoVeiculosNotificados, setOcoVeiculosNotificados] = useState(0);
+  const [ocoTco, setOcoTco] = useState(0);
+  const [ocoPrisao, setOcoPrisao] = useState(0);
 
   // 3. RELATIONAL CHILD TABLE: ANEXOS
   const [listaAnexos, setListaAnexos] = useState<AnexoItem[]>([
@@ -211,129 +201,119 @@ export default function ReportForm({ onSubmit, currentUserSession }: ReportFormP
   const [anexoTipo, setAnexoTipo] = useState<'imagem' | 'pdf' | 'outro'>('imagem');
 
   // 4. GUARNIÇÃO DE SERVIÇO PMMT
-  const [listaGuarnicoes, setListaGuarnicoes] = useState<GuarnicaoItem[]>([
-    {
-      nome_guarnicao: 'Guarnição 1901',
-      tipo_guarnicao: 'Rádio Patrulha',
-      viatura: 'VTR-1919 (Toyota Hilux)',
-      policiais_integrantes: 'Sgt PM Mário, Cb PM J. Silva, Sd PM Ramos',
-      comandante_guarnicao: 'Sgt PM Mário',
-      horario_inicial: '07:00',
-      horario_final: '19:00'
-    }
-  ]);
+  const [listaGuarnicoes, setListaGuarnicoes] = useState<GuarnicaoItem[]>([]);
   const [gNome, setGNome] = useState('');
   const [gTipo, setGTipo] = useState<GuarnicaoItem['tipo_guarnicao']>('Rádio Patrulha');
   const [gVtr, setGVtr] = useState('');
-  const [gPoliciais, setGPoliciais] = useState('');
-  const [gComandante, setGComandante] = useState('');
+  const [gVtrSelected, setGVtrSelected] = useState<CatalogoViatura | null>(null);
+  const [gComandante, setGComandante] = useState<PolicialPMMT | null>(null);
+  const [gMotorista, setGMotorista] = useState<PolicialPMMT | null>(null);
+  const [gPatrulheiros, setGPatrulheiros] = useState<PolicialPMMT[]>([]);
   const [gHorarioInicial, setGHorarioInicial] = useState('07:00');
   const [gHorarioFinal, setGHorarioFinal] = useState('19:00');
+  const [gShowPMSelector, setGShowPMSelector] = useState(false);
+  const [gPMSearchText, setGPMSearchText] = useState('');
+  const [gPMFilterRank, setGPMFilterRank] = useState('TODOS');
+  const [gPMSelectorMode, setGPMSelectorMode] = useState<'comandante' | 'motorista' | 'patrulheiro'>('comandante');
 
   // 5. ATIVIDADE DELEGADA
-  const [listaAtividadesDelegadas, setListaAtividadesDelegadas] = useState<AtividadeDelegadaItem[]>([
-    {
-      nome_equipe: 'Equipe Cidade Querência',
-      viatura: 'VTR-1933 (Renault Duster)',
-      policiais: 'Cb PM Douglas, Sd PM Lima',
-      local_operacao: 'Centro Comercial de Querência',
-      horario: '08:00 às 14:00',
-      observacoes: 'Policiamento ostensivo preventivo intensificado nos comércios.'
-    }
-  ]);
+  const [listaAtividadesDelegadas, setListaAtividadesDelegadas] = useState<AtividadeDelegadaItem[]>([]);
   const [adNomeEquipe, setAdNomeEquipe] = useState('');
-  const [adViatura, setAdViatura] = useState('');
-  const [adPoliciais, setAdPoliciais] = useState('');
+  const [adVtrSelected, setAdVtrSelected] = useState<CatalogoViatura | null>(null);
+  const [adComandante, setAdComandante] = useState<PolicialPMMT | null>(null);
+  const [adMotorista, setAdMotorista] = useState<PolicialPMMT | null>(null);
+  const [adPatrulheiros, setAdPatrulheiros] = useState<PolicialPMMT[]>([]);
   const [adLocalOperacao, setAdLocalOperacao] = useState('');
   const [adHorario, setAdHorario] = useState('08:00 às 14:00');
   const [adObservacoes, setAdObservacoes] = useState('');
+  const [adShowPMSelector, setAdShowPMSelector] = useState(false);
+  const [adPMSearchText, setAdPMSearchText] = useState('');
+  const [adPMFilterRank, setAdPMFilterRank] = useState('TODOS');
+  const [adPMSelectorMode, setAdPMSelectorMode] = useState<'comandante' | 'motorista' | 'patrulheiro'>('comandante');
 
   // 6. JORNADA EXTRAORDINÁRIA
-  const [listaJornadasExtraordinarias, setListaJornadasExtraordinarias] = useState<JornadaExtraordinariaItem[]>([
-    {
-      nome_equipe: 'Reforço Noturno Querência',
-      viatura: 'VTR-1944 (Toyota Hilux)',
-      policiais: 'Sgt PM Mota, Sd PM Antunes',
-      tipo_reforco: 'Saturação de Área',
-      horario: '18:00 às 23:00',
-      observacoes: 'Saturação intensiva com foco no perímetro comercial bancário.'
-    }
-  ]);
+  const [listaJornadasExtraordinarias, setListaJornadasExtraordinarias] = useState<JornadaExtraordinariaItem[]>([]);
   const [jeNomeEquipe, setJeNomeEquipe] = useState('');
-  const [jeViatura, setJeViatura] = useState('');
-  const [jePoliciais, setJePoliciais] = useState('');
+  const [jeVtrSelected, setJeVtrSelected] = useState<CatalogoViatura | null>(null);
+  const [jeComandante, setJeComandante] = useState<PolicialPMMT | null>(null);
+  const [jeMotorista, setJeMotorista] = useState<PolicialPMMT | null>(null);
+  const [jePatrulheiros, setJePatrulheiros] = useState<PolicialPMMT[]>([]);
   const [jeTipoReforco, setJeTipoReforco] = useState('Policiamento Ostensivo');
   const [jeHorario, setJeHorario] = useState('18:00 às 23:00');
   const [jeObservacoes, setJeObservacoes] = useState('');
-
-  // SELEÇÕES DO BANCO DE DADOS DE POLICIAIS PMMT
-  const [gSelectedPMs, setGSelectedPMs] = useState<PolicialPMMT[]>([]);
-  const [adSelectedPMs, setAdSelectedPMs] = useState<PolicialPMMT[]>([]);
-  const [jeSelectedPMs, setJeSelectedPMs] = useState<PolicialPMMT[]>([]);
-
-  // Termos de busca e filtros do banco de dados de policiais
-  const [gPMSearchText, setGPMSearchText] = useState('');
-  const [gPMFilterRank, setGPMFilterRank] = useState('TODOS');
-  const [gShowPMSelector, setGShowPMSelector] = useState(false);
-
-  const [adPMSearchText, setAdPMSearchText] = useState('');
-  const [adPMFilterRank, setAdPMFilterRank] = useState('TODOS');
-  const [adShowPMSelector, setAdShowPMSelector] = useState(false);
-
+  const [jeShowPMSelector, setJeShowPMSelector] = useState(false);
   const [jePMSearchText, setJePMSearchText] = useState('');
   const [jePMFilterRank, setJePMFilterRank] = useState('TODOS');
-  const [jeShowPMSelector, setJeShowPMSelector] = useState(false);
+  const [jePMSelectorMode, setJePMSelectorMode] = useState<'comandante' | 'motorista' | 'patrulheiro'>('comandante');
 
-  // Toggle Handlers para o banco
-  const handleToggleGMPolicial = (policial: PolicialPMMT) => {
-    const exists = gSelectedPMs.some(p => p.matricula === policial.matricula);
-    let updated: PolicialPMMT[];
-    if (exists) {
-      updated = gSelectedPMs.filter(p => p.matricula !== policial.matricula);
-    } else {
-      updated = [...gSelectedPMs, policial];
+  // Catalogo de Viaturas
+  const [catalogoViaturas, setCatalogoViaturas] = useState<CatalogoViatura[]>([]);
+  const [loadingViaturas, setLoadingViaturas] = useState(true);
+
+  useEffect(() => {
+    const loadViaturas = async () => {
+      try {
+        if (isSupabaseConfigured() && supabase) {
+          const { data } = await supabase
+            .from('catalogo_viaturas')
+            .select('*')
+            .eq('ativo', true)
+            .order('prefixo');
+          if (data && data.length > 0) {
+            setCatalogoViaturas(data);
+            setLoadingViaturas(false);
+            return;
+          }
+        }
+      } catch (e) {
+        console.error('Error loading viaturas:', e);
+      }
+      setCatalogoViaturas([
+        { prefixo: 'KICKS-001', modelo: 'Nissan Kicks', placa: 'KCK-0001', ativo: true },
+        { prefixo: 'DUSTER-001', modelo: 'Renault Duster', placa: 'DST-0001', ativo: true },
+        { prefixo: 'TRITON-001', modelo: 'Mitsubishi Triton', placa: 'TRT-0001', ativo: true },
+        { prefixo: 'TRITON-RURAL-001', modelo: 'Mitsubishi Triton Rural', placa: 'TRR-0001', ativo: true },
+        { prefixo: 'VTR-1919', modelo: 'Toyota Hilux', placa: 'OPI-0001', ativo: true },
+        { prefixo: 'VTR-1920', modelo: 'Toyota Hilux', placa: 'OPI-0002', ativo: true },
+      ]);
+      setLoadingViaturas(false);
+    };
+    loadViaturas();
+  }, []);
+
+  // Helper function to get last KM for auto-transfer
+  const getLastKmFinal = async (prefixo: string): Promise<number> => {
+    try {
+      if (isSupabaseConfigured() && supabase) {
+        const { data } = await supabase.rpc('get_last_km_final', { p_viatura_prefixo: prefixo });
+        if (data !== null && data !== undefined) {
+          return Number(data);
+        }
+      }
+    } catch (e) {
+      console.error('Error getting last KM:', e);
     }
-    setGSelectedPMs(updated);
-
-    // Formatar texto com graduação, nome e matrícula
-    const pStr = updated.map(p => `${p.graduacao} ${p.nome_completo} (Mat. ${p.matricula})`).join(', ');
-    setGPoliciais(pStr);
-
-    // Definição automática do comandante pela maior patente
-    if (updated.length > 0) {
-      const sortedByRank = [...updated].sort((a, b) => OBTER_PESO_PATENTE(b.graduacao) - OBTER_PESO_PATENTE(a.graduacao));
-      setGComandante(`${sortedByRank[0].graduacao} ${sortedByRank[0].nome_completo}`);
-    } else {
-      setGComandante('');
-    }
+    return 0;
   };
 
-  const handleToggleAdPolicial = (policial: PolicialPMMT) => {
-    const exists = adSelectedPMs.some(p => p.matricula === policial.matricula);
-    let updated: PolicialPMMT[];
-    if (exists) {
-      updated = adSelectedPMs.filter(p => p.matricula !== policial.matricula);
-    } else {
-      updated = [...adSelectedPMs, policial];
-    }
-    setAdSelectedPMs(updated);
+  // Filtered police based on search and rank
+  const getFilteredPoliciais = (searchText: string, filterRank: string, exclude: PolicialPMMT[]) => {
+    return LISTA_POLICIAIS_PMMT.filter(p => {
+      const textMatch =
+        p.nome_completo.toLowerCase().includes(searchText.toLowerCase()) ||
+        p.matricula.includes(searchText) ||
+        p.graduacao.toLowerCase().includes(searchText.toLowerCase());
 
-    const pStr = updated.map(p => `${p.graduacao} ${p.nome_completo} (Mat. ${p.matricula})`).join(', ');
-    setAdPoliciais(pStr);
-  };
+      const notExcluded = !exclude.some(ex => ex.matricula === p.matricula);
 
-  const handleToggleJePolicial = (policial: PolicialPMMT) => {
-    const exists = jeSelectedPMs.some(p => p.matricula === policial.matricula);
-    let updated: PolicialPMMT[];
-    if (exists) {
-      updated = jeSelectedPMs.filter(p => p.matricula !== policial.matricula);
-    } else {
-      updated = [...jeSelectedPMs, policial];
-    }
-    setJeSelectedPMs(updated);
-
-    const pStr = updated.map(p => `${p.graduacao} ${p.nome_completo} (Mat. ${p.matricula})`).join(', ');
-    setJePoliciais(pStr);
+      if (filterRank === 'TODOS') return textMatch && notExcluded;
+      if (filterRank === 'CAP') return textMatch && notExcluded && p.graduacao.startsWith('CAP');
+      if (filterRank === 'TEN') return textMatch && notExcluded && p.graduacao.includes('TEN');
+      if (filterRank === 'SGT') return textMatch && notExcluded && p.graduacao.includes('SGT');
+      if (filterRank === 'CB') return textMatch && notExcluded && p.graduacao.startsWith('CB');
+      if (filterRank === 'SD') return textMatch && notExcluded && p.graduacao.startsWith('SD');
+      return textMatch && notExcluded;
+    });
   };
 
   // UI state
@@ -389,43 +369,70 @@ export default function ReportForm({ onSubmit, currentUserSession }: ReportFormP
     setListaJornadasExtraordinarias([]);
     setGNome('');
     setGVtr('');
-    setGPoliciais('');
-    setGComandante('');
+    setGVtrSelected(null);
+    setGComandante(null);
+    setGMotorista(null);
+    setGPatrulheiros([]);
     setAdNomeEquipe('');
-    setAdViatura('');
-    setAdPoliciais('');
+    setAdVtrSelected(null);
+    setAdComandante(null);
+    setAdMotorista(null);
+    setAdPatrulheiros([]);
     setAdLocalOperacao('');
     setAdObservacoes('');
     setJeNomeEquipe('');
-    setJeViatura('');
-    setJePoliciais('');
+    setJeVtrSelected(null);
+    setJeComandante(null);
+    setJeMotorista(null);
+    setJePatrulheiros([]);
     setJeObservacoes('');
     setComandanteRecebe('');
     setRecebeSearchText('');
   };
 
+  // Format currency in Brazilian Real
+  const formatCurrency = (value: number): string => {
+    return new Intl.NumberFormat('pt-BR', {
+      style: 'currency',
+      currency: 'BRL'
+    }).format(value);
+  };
+
   // Handlers for Guarnição
   const handleAddGuarnicao = (e: React.MouseEvent) => {
     e.preventDefault();
-    if (!gNome.trim() || !gVtr.trim() || !gPoliciais.trim() || !gComandante.trim()) {
-      alert('Por favor, preencha os campos obrigatórios da Guarnição: Nome, Viatura, Policiais integrantes e Comandante.');
+    if (!gNome.trim() || !gVtrSelected || !gComandante || !gMotorista) {
+      alert('Por favor, preencha os campos obrigatórios: Nome, Viatura, Comandante e Motorista.');
       return;
     }
+    const patrulheirosData: PatrulheiroItem[] = gPatrulheiros.map((pm, idx) => ({
+      policial_matricula: pm.matricula,
+      policial_nome: pm.nome_completo,
+      policial_graduacao: pm.graduacao,
+      ordem: idx
+    }));
+
     const row: GuarnicaoItem = {
       nome_guarnicao: gNome.trim(),
       tipo_guarnicao: gTipo,
-      viatura: gVtr.trim(),
-      policiais_integrantes: gPoliciais.trim(),
-      comandante_guarnicao: gComandante.trim(),
+      viatura: `${gVtrSelected.prefixo} (${gVtrSelected.modelo})`,
+      viatura_prefixo: gVtrSelected.prefixo,
+      viatura_modelo: gVtrSelected.modelo,
+      comandante_matricula: gComandante.matricula,
+      comandante_guarnicao: `${gComandante.graduacao} ${OBTER_NOME_GUERRA_OU_ABREVIADO(gComandante.graduacao, gComandante.nome_completo)}`,
+      motorista_matricula: gMotorista.matricula,
+      motorista_nome: `${gMotorista.graduacao} ${OBTER_NOME_GUERRA_OU_ABREVIADO(gMotorista.graduacao, gMotorista.nome_completo)}`,
+      patrulheiros: patrulheirosData,
       horario_inicial: gHorarioInicial,
       horario_final: gHorarioFinal,
     };
     setListaGuarnicoes([...listaGuarnicoes, row]);
     setGNome('');
     setGVtr('');
-    setGPoliciais('');
-    setGComandante('');
-    setGSelectedPMs([]);
+    setGVtrSelected(null);
+    setGComandante(null);
+    setGMotorista(null);
+    setGPatrulheiros([]);
     setGPMSearchText('');
     setGShowPMSelector(false);
   };
@@ -437,25 +444,39 @@ export default function ReportForm({ onSubmit, currentUserSession }: ReportFormP
   // Handlers for Atividade Delegada
   const handleAddAtividadeDelegada = (e: React.MouseEvent) => {
     e.preventDefault();
-    if (!adNomeEquipe.trim() || !adViatura.trim() || !adPoliciais.trim() || !adLocalOperacao.trim()) {
-      alert('Por favor, preencha as informações obrigatórias da Equipe Delegada.');
+    if (!adNomeEquipe.trim() || !adVtrSelected || !adComandante || !adLocalOperacao.trim()) {
+      alert('Por favor, preencha as informações obrigatórias: Nome da Equipe, Viatura, Comandante e Local da Operação.');
       return;
     }
+    const patrulheirosData: PatrulheiroAtividadeItem[] = adPatrulheiros.map((pm, idx) => ({
+      policial_matricula: pm.matricula,
+      policial_nome: pm.nome_completo,
+      policial_graduacao: pm.graduacao,
+      ordem: idx
+    }));
+
     const row: AtividadeDelegadaItem = {
       nome_equipe: adNomeEquipe.trim(),
-      viatura: adViatura.trim(),
-      policiais: adPoliciais.trim(),
+      viatura: `${adVtrSelected.prefixo} (${adVtrSelected.modelo})`,
+      viatura_prefixo: adVtrSelected.prefixo,
+      viatura_modelo: adVtrSelected.modelo,
+      comandante_matricula: adComandante.matricula,
+      comandante_nome: `${adComandante.graduacao} ${OBTER_NOME_GUERRA_OU_ABREVIADO(adComandante.graduacao, adComandante.nome_completo)}`,
+      motorista_matricula: adMotorista?.matricula,
+      motorista_nome: adMotorista ? `${adMotorista.graduacao} ${OBTER_NOME_GUERRA_OU_ABREVIADO(adMotorista.graduacao, adMotorista.nome_completo)}` : undefined,
+      patrulheiros: patrulheirosData,
       local_operacao: adLocalOperacao.trim(),
       horario: adHorario.trim(),
       observacoes: adObservacoes.trim() || undefined,
     };
     setListaAtividadesDelegadas([...listaAtividadesDelegadas, row]);
     setAdNomeEquipe('');
-    setAdViatura('');
-    setAdPoliciais('');
+    setAdVtrSelected(null);
+    setAdComandante(null);
+    setAdMotorista(null);
+    setAdPatrulheiros([]);
     setAdLocalOperacao('');
     setAdObservacoes('');
-    setAdSelectedPMs([]);
     setAdPMSearchText('');
     setAdShowPMSelector(false);
   };
@@ -467,24 +488,38 @@ export default function ReportForm({ onSubmit, currentUserSession }: ReportFormP
   // Handlers for Jornada Extraordinária
   const handleAddJornadaExtra = (e: React.MouseEvent) => {
     e.preventDefault();
-    if (!jeNomeEquipe.trim() || !jeViatura.trim() || !jePoliciais.trim()) {
-      alert('Por favor, preencha as informações obrigatórias da Jornada Extra.');
+    if (!jeNomeEquipe.trim() || !jeVtrSelected || !jeComandante) {
+      alert('Por favor, preencha as informações obrigatórias: Nome da Equipe, Viatura e Comandante.');
       return;
     }
+    const patrulheirosData: PatrulheiroJornadaItem[] = jePatrulheiros.map((pm, idx) => ({
+      policial_matricula: pm.matricula,
+      policial_nome: pm.nome_completo,
+      policial_graduacao: pm.graduacao,
+      ordem: idx
+    }));
+
     const row: JornadaExtraordinariaItem = {
       nome_equipe: jeNomeEquipe.trim(),
-      viatura: jeViatura.trim(),
-      policiais: jePoliciais.trim(),
+      viatura: `${jeVtrSelected.prefixo} (${jeVtrSelected.modelo})`,
+      viatura_prefixo: jeVtrSelected.prefixo,
+      viatura_modelo: jeVtrSelected.modelo,
+      comandante_matricula: jeComandante.matricula,
+      comandante_nome: `${jeComandante.graduacao} ${OBTER_NOME_GUERRA_OU_ABREVIADO(jeComandante.graduacao, jeComandante.nome_completo)}`,
+      motorista_matricula: jeMotorista?.matricula,
+      motorista_nome: jeMotorista ? `${jeMotorista.graduacao} ${OBTER_NOME_GUERRA_OU_ABREVIADO(jeMotorista.graduacao, jeMotorista.nome_completo)}` : undefined,
+      patrulheiros: patrulheirosData,
       tipo_reforco: jeTipoReforco.trim(),
       horario: jeHorario.trim(),
       observacoes: jeObservacoes.trim() || undefined,
     };
     setListaJornadasExtraordinarias([...listaJornadasExtraordinarias, row]);
     setJeNomeEquipe('');
-    setJeViatura('');
-    setJePoliciais('');
+    setJeVtrSelected(null);
+    setJeComandante(null);
+    setJeMotorista(null);
+    setJePatrulheiros([]);
     setJeObservacoes('');
-    setJeSelectedPMs([]);
     setJePMSearchText('');
     setJeShowPMSelector(false);
   };
@@ -498,27 +533,46 @@ export default function ReportForm({ onSubmit, currentUserSession }: ReportFormP
   };
 
   // Helper row managers for Viaturas
-  const handleAddViatura = (e: React.MouseEvent) => {
+  const handleAddViatura = async (e: React.MouseEvent) => {
     e.preventDefault();
-    if (!vtrPrefixo.trim() || !vtrModelo.trim()) {
-      alert('Por favor, preencha o Prefixo e o Modelo da Viatura');
+    if (!vtrSelected) {
+      alert('Por favor, selecione uma viatura do catálogo');
       return;
     }
+    if (vtrKmInit === undefined || vtrKmFinal === undefined) {
+      alert('Por favor, preencha o KM Inicial e KM Final');
+      return;
+    }
+
     const row: Viatura = {
-      prefixo: vtrPrefixo.toUpperCase().trim(),
-      modelo: vtrModelo.trim(),
-      placa: vtrPlaca.toUpperCase().trim() || undefined,
+      prefixo: vtrSelected.prefixo,
+      modelo: vtrSelected.modelo,
+      placa: vtrSelected.placa,
       km_inicial: vtrKmInit,
-      km_final: vtrKmFinal
+      km_final: vtrKmFinal,
+      km_abastecimento: vtrKmAbastecimento,
+      litros_abastecidos: vtrLitrosAbastecidos,
+      valor_abastecimento: vtrValorAbastecimento
     };
     setListaViaturas([...listaViaturas, row]);
     setViaturasCount(prev => prev + 1);
+
     // Clear
-    setVtrPrefixo('');
-    setVtrModelo('');
-    setVtrPlaca('');
+    setVtrSelected(null);
     setVtrKmInit(undefined);
     setVtrKmFinal(undefined);
+    setVtrKmAbastecimento(undefined);
+    setVtrLitrosAbastecidos(undefined);
+    setVtrValorAbastecimento(undefined);
+  };
+
+  // Handle viatura selection with auto-KM from last report
+  const handleVtrSelectWithAutoKm = async (viatura: CatalogoViatura) => {
+    setVtrSelected(viatura);
+    const lastKm = await getLastKmFinal(viatura.prefixo);
+    if (lastKm > 0) {
+      setVtrKmInit(lastKm);
+    }
   };
 
   const handleRemoveViatura = (index: number) => {
@@ -535,17 +589,34 @@ export default function ReportForm({ onSubmit, currentUserSession }: ReportFormP
     }
     const row: OcorrenciaItem = {
       natureza_ocorrencia: ocoNatureza,
+      tipo_registro: ocoTipoRegistro,
       ocorrencia_bo: ocoBo.trim() || undefined,
       suspeitos_conduzidos: ocoSuspeitos,
       observacoes: ocoObs.trim(),
-      local_fato: ocoLocal.trim() || undefined
+      local_fato: ocoLocal.trim() || undefined,
+      // Auto-productivity fields
+      armas_apreendidas: ocoArmas,
+      municoes_apreendidas: ocoMunicoes,
+      drogas_peso_gramas: ocoDrogas,
+      valores_apreendidos: ocoValores,
+      veiculos_recuperados: ocoVeiculosRecuperados,
+      veiculos_apreendidos: ocoVeiculosApreendidos,
+      veiculos_notificados: ocoVeiculosNotificados,
+      tco_registrados: ocoTco,
+      prisao_flagrante: ocoPrisao
     };
     setListaOcorrencias([...listaOcorrencias, row]);
-    
+
+    // Auto-update totals
+    setArmas(prev => prev + ocoArmas);
+    setMunicoes(prev => prev + ocoMunicoes);
+    setDrogasPeso(prev => prev + ocoDrogas);
+    setValores(prev => prev + ocoValores);
+
     // Auto appending a bullet to consolidated history text area for convenience
-    const currentListText = ocoBo 
-      ? `• [${ocoNatureza}] - BO ${ocoBo}: ${ocoObs.trim()} (${ocoLocal || 'Local não informado'}).\n`
-      : `• [${ocoNatureza}]: ${ocoObs.trim()} (${ocoLocal || 'Local não informado'}).\n`;
+    const currentListText = ocoBo
+      ? `• [${ocoTipoRegistro}] ${ocoNatureza} - BO ${ocoBo}: ${ocoObs.trim()} (${ocoLocal || 'Local não informado'}).\n`
+      : `• [${ocoTipoRegistro}] ${ocoNatureza}: ${ocoObs.trim()} (${ocoLocal || 'Local não informado'}).\n`;
     setOcorrenciasConsolidadas(prev => prev + currentListText);
 
     // Clear row inputs
@@ -553,6 +624,15 @@ export default function ReportForm({ onSubmit, currentUserSession }: ReportFormP
     setOcoSuspeitos(0);
     setOcoObs('');
     setOcoLocal('');
+    setOcoArmas(0);
+    setOcoMunicoes(0);
+    setOcoDrogas(0);
+    setOcoValores(0);
+    setOcoVeiculosRecuperados(0);
+    setOcoVeiculosApreendidos(0);
+    setOcoVeiculosNotificados(0);
+    setOcoTco(0);
+    setOcoPrisao(0);
   };
 
   const handleRemoveOcorrencia = (index: number) => {
