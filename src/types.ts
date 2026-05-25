@@ -14,12 +14,16 @@ export interface AbastecimentoItem {
 
 export interface Viatura {
   id?: string;
-  prefixo: string; // Ex: VTR-1049
-  modelo: string;  // Ex: Toyota Hilux
+  relatorio_id?: string;
+  prefixo: string;
+  modelo: string;
   placa?: string;
   km_inicial?: number;
   km_final?: number;
-  km_inicial_auto?: number; // Auto-filled from previous report
+  km_inicial_auto?: number;
+  km_abastecimento?: number;
+  litros_abastecidos?: number;
+  valor_abastecimento?: number;
   abastecimento?: AbastecimentoItem;
 }
 
@@ -47,11 +51,22 @@ export interface ProdutividadeAutomatica {
 
 export interface OcorrenciaItem {
   id?: string;
-  natureza_ocorrencia: string; // Ex: Roubo de veículo, Tráfico de drogas
-  ocorrencia_bo?: string;      // Nº do Boletim de Ocorrência
+  natureza_ocorrencia: string;
+  ocorrencia_bo?: string;
+  tipo_registro?: 'BO' | 'TCO' | 'APREENSAO' | 'PRISAO';
   suspeitos_conduzidos?: number;
-  observacoes: string;         // Descrição detalhada do fato relatado
-  local_fato?: string;         // Bairro ou endereço do fato
+  observacoes: string;
+  local_fato?: string;
+  // Auto-productivity fields
+  armas_apreendidas?: number;
+  municoes_apreendidas?: number;
+  drogas_peso_gramas?: number;
+  valores_apreendidos?: number;
+  veiculos_recuperados?: number;
+  veiculos_apreendidos?: number;
+  veiculos_notificados?: number;
+  tco_registrados?: number;
+  prisao_flagrante?: number;
 }
 
 export interface AnexoItem {
@@ -87,21 +102,53 @@ export interface GuarnicaoItem {
   horario_final: string;
 }
 
+export interface PatrulheiroAtividadeItem {
+  id?: string;
+  atividade_id?: string;
+  policial_matricula: string;
+  policial_nome?: string;
+  policial_graduacao?: string;
+  ordem?: number;
+}
+
 export interface AtividadeDelegadaItem {
   id?: string;
   nome_equipe: string;
   viatura: string;
-  policiais: string;
+  viatura_prefixo?: string;
+  viatura_modelo?: string;
+  comandante_matricula?: string;
+  comandante_nome?: string;
+  motorista_matricula?: string;
+  motorista_nome?: string;
+  patrulheiros?: PatrulheiroAtividadeItem[];
+  policiais?: string; // Deprecated - backward compat
   local_operacao: string;
   horario: string;
   observacoes?: string;
+}
+
+export interface PatrulheiroJornadaItem {
+  id?: string;
+  jornada_id?: string;
+  policial_matricula: string;
+  policial_nome?: string;
+  policial_graduacao?: string;
+  ordem?: number;
 }
 
 export interface JornadaExtraordinariaItem {
   id?: string;
   nome_equipe: string;
   viatura: string;
-  policiais: string;
+  viatura_prefixo?: string;
+  viatura_modelo?: string;
+  comandante_matricula?: string;
+  comandante_nome?: string;
+  motorista_matricula?: string;
+  motorista_nome?: string;
+  patrulheiros?: PatrulheiroJornadaItem[];
+  policiais?: string; // Deprecated - backward compat
   tipo_reforco: string;
   horario: string;
   observacoes?: string;
