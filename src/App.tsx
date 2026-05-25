@@ -1,423 +1,477 @@
-import React, { useState, useEffect } from 'react';
-import { supabase } from './supabase';
-import { UserSession, PoliceReport } from './types';
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import { useState, useEffect } from 'react';
+import { PoliceReport, UserSession } from './types';
+import { supabase, isSupabaseConfigured, LocalDb, fetchFullReports, saveFullReport } from './supabase';
 import LoginScreen from './components/LoginScreen';
 import ReportForm from './components/ReportForm';
 import ReportList from './components/ReportList';
 import SqlSchemaView from './components/SqlSchemaView';
-import ViaturaManager from './components/ViaturaManager';
 import { 
   Shield, 
-  FileText, 
-  BookOpen, 
+  FilePlus, 
+  Files, 
   Database, 
   LogOut, 
-  AlertTriangle,
-  Car
+  User, 
+  CalendarMinus, 
+  Menu, 
+  X,
+  Radio,
+  FileCheck2,
+  Globe,
+  Lock
 } from 'lucide-react';
 
 export default function App() {
-  const [logado, setLogado] = useState(false);
-  const [session, setSession] = useState<UserSession | null>(null);
-  const [activeTab, setActiveTab] = useState<'form' | 'list' | 'database' | 'viaturas_admin'>('list');
+  const [user, setUser] = useState<UserSession | null>(null);
+  const [currentTab, setCurrentTab] = useState<'form' | 'list' | 'database'>('list');
   const [reports, setReports] = useState<PoliceReport[]>([]);
-  const [loadingReports, setLoadingReports] = useState(false);
-  
-  // Persistent login session on page reload
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+
+  const isConfigured = isSupabaseConfigured();
+
+  // Try auto-login and establish Auth state listening on mount
   useEffect(() => {
-    const saved = localStorage.getItem('rdspm_session');
-    if (saved) {
+    let rawLocalSession: string | null = null;
+    try {
+      rawLocalSession = localStorage.getItem('rdspm_session');
+    } catch (e: any) {
+      console.warn('[RDS-PM] Erro ao ler localStorage:', e?.message || e);
+    }
+
+    if (rawLocalSession) {
       try {
-        const parsed = JSON.parse(saved);
-        setSession(parsed);
-        setLogado(true);
-      } catch (e) {
-        console.warn('[RDS-PM] Error parsing saved local session data.');
+        const parsed = JSON.parse(rawLocalSession);
+        if (parsed && typeof parsed === 'object') {
+          console.log(`[RDS-PM] Tentando restaurar sessão para: RG=${parsed.matricula || 'N/A'}, Nome=${parsed.name || 'N/A'}`);
+          
+          const validatedSession: UserSession = {
+            id: parsed.id || 'temp-id',
+            email: parsed.email || '',
+            name: parsed.name || 'USUÁRIO',
+            role: parsed.role || 'POLICIAL MILITAR',
+            matricula: parsed.matricula || '000.000',
+            pelotao: parsed.pelotao || '',
+            cidade: parsed.cidade || 'Cuiabá',
+            isDemo: parsed.isDemo === undefined ? true : !!parsed.isDemo
+          };
+          setUser(validatedSession);
+          loadReports(validatedSession);
+        } else {
+          console.warn('[RDS-PM] Sessão gravada no localStorage é ínfima ou inválida.');
+          localStorage.removeItem('rdspm_session');
+        }
+      } catch (err: any) {
+        console.error('[RDS-PM] Incident de JSON parse no cache de sessão:', err?.message || err);
+        try {
+          localStorage.removeItem('rdspm_session');
+        } catch {}
       }
     }
   }, []);
 
-  // Fetch reports regularly once logged in
-  const fetchReports = async () => {
-    if (!session) return;
-    setLoadingReports(true);
+  const loadReports = async (session: UserSession) => {
+    setSyncing(true);
+    const safeSession = session || { isDemo: true };
+    if (safeSession.isDemo || !isConfigured) {
+      // Local Database flow
+      const data = LocalDb.getReports();
+      setReports(data || []);
+      setSyncing(false);
+    } else {
+      // Supabase fetch flow
+      try {
+        const fullReports = await fetchFullReports();
+        setReports(fullReports || []);
+      } catch (err: any) {
+        console.error('[RDS-PM] Falha de sincronização Supabase, usando banco local:', err?.message || err);
+        setReports(LocalDb.getReports() || []);
+      } finally {
+        setSyncing(false);
+      }
+    }
+  };
+
+  const handleLoginSuccess = (session: UserSession) => {
+    if (!session || typeof session !== 'object') {
+      console.error('[RDS-PM] Dados de autenticação nulos ou incorretos:', session);
+      return;
+    }
+    const validatedSession: UserSession = {
+      id: session.id || 'temp-id',
+      email: session.email || '',
+      name: session.name || 'USUÁRIO',
+      role: session.role || 'POLICIAL MILITAR',
+      matricula: session.matricula || '000.000',
+      pelotao: session.pelotao || '',
+      cidade: session.cidade || 'Cuiabá',
+      isDemo: session.isDemo === undefined ? true : !!session.isDemo
+    };
+    
+    console.log(`[RDS-PM] Login efetuado com sucesso: ID=${validatedSession.id}, Nome=${validatedSession.name}, Graduação/Role=${validatedSession.role}`);
+    
+    setUser(validatedSession);
     try {
-      const { data, error } = await supabase
-        .from('relatorios')
-        .select('*')
-        .order('created_at', { ascending: false });
-
-      if (error) {
-        console.warn('[RDS-PM] Fail fetching online database reports. Operating with local memory cache:', error);
-        // Fallback to local memory if PostgreSQL table is not created yet
-        const cached = localStorage.getItem(`rdspm_reports_${session.matricula}`);
-        if (cached) {
-          setReports(JSON.parse(cached));
-        }
-      } else if (data) {
-        setReports(data || []);
-      }
-    } catch (err) {
-      console.error('[RDS-PM] Fetch reports exception:', err);
-    } finally {
-      setLoadingReports(false);
+      localStorage.setItem('rdspm_session', JSON.stringify(validatedSession));
+    } catch (e: any) {
+      console.error('[RDS-PM] Falha ao sincronizar dados de sessão no cache:', e?.message || e);
     }
+    loadReports(validatedSession);
+    setCurrentTab('list'); // Redirect directly to visualizer dashboard
   };
 
-  useEffect(() => {
-    if (logado && session) {
-      fetchReports();
-    }
-  }, [logado, session]);
-
-  const handleLoginSuccess = (sessionData: UserSession) => {
-    setSession(sessionData);
-    setLogado(true);
-    localStorage.setItem('rdspm_session', JSON.stringify(sessionData));
+  const handleLogout = async () => {
+    setUser(null);
+    setReports([]);
+    localStorage.removeItem('rdspm_session');
   };
 
-  const handleLogout = () => {
-    if (window.confirm('Deseja realmente encerrar sua sessão no Terminal RDS?')) {
-      setSession(null);
-      setLogado(false);
-      localStorage.removeItem('rdspm_session');
-    }
-  };
+  const handleSaveReport = async (payload: Omit<PoliceReport, 'id' | 'created_at'>): Promise<boolean> => {
+    if (!user) return false;
 
-  // Submit report to Supabase with local fallback preservation
-  const handleCreateReport = async (newReport: Omit<PoliceReport, 'id' | 'created_at'>): Promise<boolean> => {
-    if (!session) return false;
-
-    try {
-      const { data, error } = await supabase
-        .from('relatorios')
-        .insert([
-          {
-            ...newReport,
-            user_email: session.email
-          }
-        ])
-        .select();
-
-      if (error) {
-        console.warn('[RDS-PM] Fail saving report to cloud. Saving to local storage for persistence:', error);
-        
-        // Write to local cache so the user can still print and view!
-        const fallbackReport: PoliceReport = {
-          ...newReport,
-          id: `local_${Date.now()}`,
-          created_at: new Date().toISOString()
-        };
-        const updatedLocal = [fallbackReport, ...reports];
-        setReports(updatedLocal);
-        localStorage.setItem(`rdspm_reports_${session.matricula}`, JSON.stringify(updatedLocal));
-        alert('AVISO: Relatório gravado apenas localmente no navegador, pois as tabelas cloud ainda não foram instaladas via aba "Infraestrutura DB"!');
-        return true;
-      }
-
-      // If saved successfully online, also insert the associated vehicle refueling records
-      const createdReport = data?.[0];
-      if (createdReport && newReport.lista_viaturas) {
-        for (const vtr of newReport.lista_viaturas) {
-          if (vtr.id) {
-            const viaturaId = typeof vtr.id === 'string' ? parseInt(vtr.id) || null : vtr.id;
-            if (viaturaId) {
-              await supabase.from('abastecimentos_viaturas').insert({
-                relatorio_id: createdReport.id,
-                viatura_id: viaturaId,
-                km_abastecimento: Number(vtr.km_abastecimento) || 0,
-                litros: Number(vtr.litros) || 0,
-                saldo: Number(vtr.saldo) || 0,
-                valor_abastecido: Number(vtr.valor_abastecido) || 0
-              });
-            }
-          }
-        }
-      }
-
-      await fetchReports();
+    if (user.isDemo || !isConfigured) {
+      // Offline LocalStorage insertion
+      const newReport = LocalDb.saveReport(payload);
+      setReports((prev) => [newReport, ...prev]);
       return true;
-    } catch (err) {
-      console.error('[RDS-PM] Error inserting report:', err);
-      return false;
-    }
-  };
-
-  // Delete report handler
-  const handleDeleteReport = async (id: string): Promise<boolean> => {
-    if (!session) return false;
-
-    if (!window.confirm('Tem certeza de que deseja excluir permanentemente este relatório de serviço?')) {
-      return false;
-    }
-
-    try {
-      // If it's a local fallback record
-      if (id.startsWith('local_')) {
-        const filtered = reports.filter(r => r.id !== id);
-        setReports(filtered);
-        localStorage.setItem(`rdspm_reports_${session.matricula}`, JSON.stringify(filtered));
+    } else {
+      // Supabase database insertion
+      try {
+        const fullReport = await saveFullReport(payload, user.id, user.email);
+        setReports((prev) => [fullReport, ...prev]);
         return true;
-      }
-
-      const { error } = await supabase
-        .from('relatorios')
-        .delete()
-        .eq('id', id);
-
-      if (error) {
-        console.error('[RDS-PM] Cloud delete error:', error);
+      } catch (err) {
+        console.error('Falha ao cadastrar relatório relacional no Supabase:', err);
         return false;
       }
-
-      await fetchReports();
-      return true;
-    } catch (err) {
-      console.error('[RDS-PM] Delete exception:', err);
-      return false;
     }
   };
 
-  // Return LoginScreen if they are not logged in
-  if (!logado || !session) {
+  const handleDeleteReport = async (id: string | number): Promise<boolean> => {
+    if (!user) return false;
+
+    if (!id && id !== 0) {
+      console.warn('[RDS-PM] Tentativa de exclusão com ID nulo ou indefinido.');
+      return false;
+    }
+
+    const idStr = String(id);
+
+    if (user.isDemo || !isConfigured || idStr.startsWith('report-local-')) {
+      // Offline deletion
+      LocalDb.deleteReport(idStr);
+      setReports((prev) => prev.filter((r) => String(r?.id || '') !== idStr));
+      return true;
+    } else {
+      // Supabase deletion
+      try {
+        const { error } = await supabase!
+          .from('relatorios')
+          .delete()
+          .eq('id', id);
+
+        if (error) throw error;
+
+        setReports((prev) => prev.filter((r) => String(r?.id || '') !== idStr));
+        return true;
+      } catch (err) {
+        console.error('Falha ao deletar relatório do Supabase:', err);
+        return false;
+      }
+    }
+  };
+
+  // If officer session doesn't exist, show police portal login credentials screen
+  if (!user) {
     return <LoginScreen onLoginSuccess={handleLoginSuccess} />;
   }
 
   return (
-    <div className="min-h-screen flex flex-col bg-[#020b2d] text-slate-100 font-sans selection:bg-emerald-500/30">
+    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col" id="app-workspace">
       
-      {/* GLOWING HEADER NAVIGATION RAIL */}
-      <header className="sticky top-0 z-40 bg-[#04154d]/90 backdrop-blur-md border-b border-blue-900 shadow-xl" id="system-dashboard-header">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-18 flex items-center justify-between">
-          
-          {/* Logo brand */}
-          <div className="flex items-center gap-3">
-            <img 
-              src="https://upload.wikimedia.org/wikipedia/commons/e/ea/Bras%C3%A3o_da_PMMT.svg" 
-              alt="PMMT"
-              className="w-10 h-10 object-contain drop-shadow-[0_0_8px_rgba(30,144,255,0.3)] pointer-events-none"
-              referrerPolicy="no-referrer"
-            />
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
-                <h1 className="font-display font-black tracking-wider text-base sm:text-lg text-white uppercase">
-                  SISTEMA RDS-PM
-                </h1>
-              </div>
-              <p className="text-[10px] sm:text-xs font-mono text-blue-450 tracking-wider">
-                AUTO-HOMOLOGADO • MATO GROSSO
-              </p>
-            </div>
-          </div>
-
-          {/* Centered Operational Tab selector */}
-          <nav className="hidden md:flex items-center gap-1.5" aria-label="Negação Militar Principal">
-            <button
-              onClick={() => setActiveTab('list')}
-              className={`px-4 py-2 text-xs font-bold font-mono uppercase tracking-wider rounded-lg transition cursor-pointer flex items-center gap-2 border ${
-                activeTab === 'list'
-                  ? 'bg-blue-950/80 text-white border-blue-500'
-                  : 'bg-transparent text-slate-400 border-transparent hover:text-slate-200 hover:bg-blue-950/30'
-              }`}
-            >
-              <BookOpen className="h-4 w-4 text-cyan-400" />
-              <span>Livro de Registros</span>
-            </button>
-
-            <button
-              onClick={() => setActiveTab('form')}
-              className={`px-4 py-2 text-xs font-bold font-mono uppercase tracking-wider rounded-lg transition cursor-pointer flex items-center gap-2 border ${
-                activeTab === 'form'
-                  ? 'bg-blue-950/80 text-white border-blue-500'
-                  : 'bg-transparent text-slate-400 border-transparent hover:text-slate-200 hover:bg-blue-950/30'
-              }`}
-            >
-              <FileText className="h-4 w-4 text-emerald-450" />
-              <span>Lançar RDS</span>
-            </button>
-
-            <button
-              onClick={() => setActiveTab('database')}
-              className={`px-4 py-2 text-xs font-bold font-mono uppercase tracking-wider rounded-lg transition cursor-pointer flex items-center gap-2 border ${
-                activeTab === 'database'
-                  ? 'bg-blue-950/80 text-white border-blue-500'
-                  : 'bg-transparent text-slate-400 border-transparent hover:text-slate-200 hover:bg-blue-950/30'
-              }`}
-            >
-              <Database className="h-4 w-4 text-amber-500" />
-              <span>Infraestrutura DB</span>
-            </button>
-
-            <button
-              onClick={() => setActiveTab('viaturas_admin')}
-              className={`px-4 py-2 text-xs font-bold font-mono uppercase tracking-wider rounded-lg transition cursor-pointer flex items-center gap-2 border ${
-                activeTab === 'viaturas_admin'
-                  ? 'bg-blue-950/80 text-white border-blue-500'
-                  : 'bg-transparent text-slate-400 border-transparent hover:text-slate-200 hover:bg-blue-950/30'
-              }`}
-            >
-              <Car className="h-4 w-4 text-amber-400" />
-              <span>Gerenciar Viaturas</span>
-            </button>
-          </nav>
-
-          {/* Right menu: Operator & Log Out */}
-          <div className="flex items-center gap-4">
+      {/* 1. STATEFUL COP HEADER & BRANDING */}
+      <header className="bg-slate-900 border-b border-slate-800 sticky top-0 z-30 shadow-md">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex items-center justify-between h-16">
             
-            {/* Operator Rank & Name info */}
-            <div className="hidden sm:flex flex-col text-right">
-              <span className="text-[10px] font-mono tracking-wider font-extrabold text-blue-400 block uppercase">
-                OPERADOR LOGADO
-              </span>
-              <span className="text-xs font-bold text-slate-250 truncate block uppercase max-w-[150px]">
-                {session.name || 'Oficial PM'}
-              </span>
+            {/* Left side brand */}
+            <div className="flex items-center gap-3">
+              <div className="w-11 h-11 flex items-center justify-center shrink-0 relative">
+                <div className="absolute inset-0 bg-amber-500/5 rounded-full blur-sm" />
+                <img 
+                  src="https://upload.wikimedia.org/wikipedia/commons/e/ea/Bras%C3%A3o_da_PMMT.svg" 
+                  alt="Brasão PMMT" 
+                  className="relative w-10 h-10 object-contain drop-shadow-[0_0_5px_rgba(245,158,11,0.35)]"
+                  referrerPolicy="no-referrer"
+                />
+              </div>
+              <div>
+                <div className="flex items-center gap-1.5">
+                  <span className="font-extrabold text-base tracking-tight text-white font-sans uppercase">RDS-PM</span>
+                  <span className="hidden sm:inline-block text-[10px] uppercase font-mono px-1.5 py-0.5 bg-blue-950 border border-blue-900 text-blue-400 rounded">PMMT</span>
+                </div>
+                <p className="text-[10px] text-slate-400 tracking-wider font-sans">Polícia Militar de Mato Grosso</p>
+              </div>
             </div>
 
-            {/* Logout button */}
-            <button
-              onClick={handleLogout}
-              className="px-3.5 py-2.5 bg-rose-950/30 hover:bg-rose-900/40 text-rose-450 hover:text-rose-300 rounded-lg border border-rose-900/35 transition cursor-pointer text-xs font-bold font-mono flex items-center gap-1.5 focus:outline-none"
-              title="Sair do terminal seguro"
-            >
-              <LogOut className="h-4 w-4" />
-              <span className="hidden sm:inline uppercase">Sair</span>
-            </button>
-
-          </div>
-
-        </div>
-      </header>
-
-      {/* MOBILE FLOATING NAV BAR */}
-      <div className="md:hidden sticky top-18 z-30 bg-[#020722] border-b border-blue-950 px-4 py-2.5 flex items-center justify-around gap-1">
-        <button
-          onClick={() => setActiveTab('list')}
-          className={`flex-1 py-2 text-[10px] font-bold font-mono tracking-wider uppercase text-center rounded transition flex flex-col items-center gap-1 leading-none ${
-            activeTab === 'list' ? 'bg-blue-950/90 text-white' : 'text-slate-400 hover:text-white'
-          }`}
-        >
-          <BookOpen className="h-4.5 w-4.5 text-cyan-400" />
-          <span>Registros</span>
-        </button>
-
-        <button
-          onClick={() => setActiveTab('form')}
-          className={`flex-1 py-2 text-[10px] font-bold font-mono tracking-wider uppercase text-center rounded transition flex flex-col items-center gap-1 leading-none ${
-            activeTab === 'form' ? 'bg-blue-950/90 text-white' : 'text-slate-400 hover:text-white'
-          }`}
-        >
-          <FileText className="h-4.5 w-4.5 text-emerald-400" />
-          <span>Lançar RDS</span>
-        </button>
-
-        <button
-          onClick={() => setActiveTab('database')}
-          className={`flex-1 py-2 text-[10px] font-bold font-mono tracking-wider uppercase text-center rounded transition flex flex-col items-center gap-1 leading-none ${
-            activeTab === 'database' ? 'bg-blue-950/90 text-white' : 'text-slate-400 hover:text-white'
-          }`}
-        >
-          <Database className="h-4.5 w-4.5 text-amber-500" />
-          <span>Infra DB</span>
-        </button>
-
-        <button
-          onClick={() => setActiveTab('viaturas_admin')}
-          className={`flex-1 py-2 text-[10px] font-bold font-mono tracking-wider uppercase text-center rounded transition flex flex-col items-center gap-1 leading-none ${
-            activeTab === 'viaturas_admin' ? 'bg-blue-950/90 text-white' : 'text-slate-400 hover:text-white'
-          }`}
-        >
-          <Car className="h-4.5 w-4.5 text-amber-450" />
-          <span>Viaturas</span>
-        </button>
-      </div>
-
-      {/* DETAILED DATABASE SYNCHRONIZATION ALERTS */}
-      {activeTab !== 'database' && reports.length === 0 && !loadingReports && (
-        <div className="bg-amber-955/15 border-b border-amber-900/30 text-amber-400 px-4 py-2.5 text-xs text-center">
-          <div className="max-w-7xl mx-auto flex items-center justify-center gap-2">
-            <AlertTriangle className="h-4 w-4 shrink-0 text-amber-500" />
-            <span>
-              <strong>Banco de dados vazio:</strong> Se você ainda não instalou as tabelas no Supabase Cloud, vá em <b className="underline cursor-pointer" onClick={() => setActiveTab('database')}>"Infraestrutura DB"</b> para criar automaticamente as tabelas e seedar policiais homologados!
-            </span>
-          </div>
-        </div>
-      )}
-
-      {/* CORE PAGES RENDERING BODY CODES */}
-      <main className="flex-1 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        
-        {activeTab === 'list' && (
-          <div className="space-y-6">
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-blue-950 pb-5">
-              <div>
-                <h2 className="text-xl sm:text-2xl font-black font-display tracking-tight text-white uppercase">
-                  LIVRO DE REGISTROS DIÁRIOS
-                </h2>
-                <p className="text-xs text-slate-400 mt-1">
-                  Exibindo relatórios de policiamento tático homologados pela chefia da unidade.
-                </p>
-              </div>
+            {/* Desktop Navigation Tabs */}
+            <nav className="hidden md:flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => setCurrentTab('list')}
+                className={`px-4 py-2 text-xs font-bold uppercase tracking-wider rounded-lg border transition-all flex items-center gap-2 cursor-pointer ${
+                  currentTab === 'list'
+                    ? 'bg-blue-800/20 border-blue-700/80 text-blue-300'
+                    : 'border-transparent text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <Files className="h-4 w-4" />
+                <span>Consultar Relatórios</span>
+              </button>
 
               <button
-                onClick={() => setActiveTab('form')}
-                className="px-4 py-2 bg-gradient-to-r from-emerald-700 to-emerald-600 hover:from-emerald-650 hover:to-emerald-555 text-white text-xs font-bold font-mono tracking-wider uppercase rounded-lg transition shadow-md shadow-emerald-950/40 hover:shadow-emerald-550/15 flex items-center justify-center gap-1.5 cursor-pointer self-start sm:self-center"
+                type="button"
+                onClick={() => setCurrentTab('form')}
+                className={`px-4 py-2 text-xs font-bold uppercase tracking-wider rounded-lg border transition-all flex items-center gap-2 cursor-pointer ${
+                  currentTab === 'form'
+                    ? 'bg-blue-800/20 border-blue-700/80 text-blue-300'
+                    : 'border-transparent text-slate-400 hover:text-slate-200'
+                }`}
               >
-                <FileText className="h-4 w-4" />
-                <span>LANÇAR NOVO RDS</span>
+                <FilePlus className="h-4 w-4" />
+                <span>Preencher Novo RDS</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setCurrentTab('database')}
+                className={`px-4 py-2 text-xs font-bold uppercase tracking-wider rounded-lg border transition-all flex items-center gap-2 cursor-pointer ${
+                  currentTab === 'database'
+                    ? 'bg-blue-800/20 border-blue-700/80 text-blue-300'
+                    : 'border-transparent text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <Database className="h-4 w-4" />
+                <span>Configurar Supabase</span>
+              </button>
+            </nav>
+
+            {/* Right side user info & Logout */}
+            <div className="hidden md:flex items-center gap-4">
+              <div className="text-right">
+                <span className="block text-xs font-bold font-sans text-slate-200">
+                  {user?.name || 'Militar de Serviço'}
+                </span>
+                <span className="block text-[10px] font-mono text-amber-500 font-semibold uppercase">
+                  Policial Militar Conectado
+                </span>
+              </div>
+              
+              <button
+                type="button"
+                onClick={handleLogout}
+                title="Sair do Sistema"
+                className="p-2.5 bg-slate-950 hover:bg-red-950/40 border border-slate-800 hover:border-red-900 text-slate-400 hover:text-red-400 rounded-lg transition duration-150 cursor-pointer"
+              >
+                <LogOut className="h-4 w-4" />
               </button>
             </div>
 
-            {loadingReports ? (
-              <div className="py-20 flex flex-col items-center justify-center space-y-4">
-                <span className="w-10 h-10 border-4 border-blue-800 border-t-cyan-400 rounded-full animate-spin" />
-                <p className="text-sm font-mono text-slate-450 uppercase animate-pulse">
-                  CONECTANDO COM A CENTRAL TÁTICA...
-                </p>
+            {/* Mobile Menu Toggle Button */}
+            <div className="flex md:hidden items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setMenuOpen(!menuOpen)}
+                className="p-2 text-slate-400 rounded-lg hover:bg-slate-800 hover:text-slate-200 transition"
+              >
+                {menuOpen ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
+              </button>
+            </div>
+
+          </div>
+        </div>
+
+        {/* Mobile Navigation Drawer */}
+        {menuOpen && (
+          <div className="md:hidden bg-slate-900 border-t border-slate-800 p-4 space-y-3 animate-fadeIn">
+            {/* User specs */}
+            <div className="border-b border-slate-800 pb-3 mb-2 flex items-center gap-3">
+              <div className="w-9 h-9 rounded-full bg-slate-950 border border-slate-805 flex items-center justify-center">
+                <User className="h-4.5 w-4.5 text-blue-400" />
               </div>
-            ) : (
-              <div className="animate-fadeIn">
-                <ReportList 
-                  reports={reports} 
-                  onDelete={handleDeleteReport} 
-                  currentUserEmail={session.email}
-                  onNavigateToForm={() => setActiveTab('form')}
-                />
+              <div>
+                <span className="block text-xs font-extrabold text-white">{user?.name || 'Militar de Serviço'}</span>
+                <span className="block text-[10px] font-mono text-emerald-400 font-semibold uppercase">PMMT Oficial</span>
               </div>
-            )}
+            </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                setCurrentTab('list');
+                setMenuOpen(false);
+              }}
+              className={`w-full text-left px-4 py-2.5 rounded-lg text-sm font-semibold flex items-center gap-2.5 ${
+                currentTab === 'list' ? 'bg-blue-800 text-white' : 'text-slate-400 hover:bg-slate-850'
+              }`}
+            >
+              <Files className="h-4 w-4" />
+              <span>Consultar Relatórios</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setCurrentTab('form');
+                setMenuOpen(false);
+              }}
+              className={`w-full text-left px-4 py-2.5 rounded-lg text-sm font-semibold flex items-center gap-2.5 ${
+                currentTab === 'form' ? 'bg-blue-800 text-white' : 'text-slate-400 hover:bg-slate-850'
+              }`}
+            >
+              <FilePlus className="h-4 w-4" />
+              <span>Preencher Novo RDS</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setCurrentTab('database');
+                setMenuOpen(false);
+              }}
+              className={`w-full text-left px-4 py-2.5 rounded-lg text-sm font-semibold flex items-center gap-2.5 ${
+                currentTab === 'database' ? 'bg-blue-800 text-white' : 'text-slate-400 hover:bg-slate-850'
+              }`}
+            >
+              <Database className="h-4 w-4" />
+              <span>Configurar Supabase</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                handleLogout();
+                setMenuOpen(false);
+              }}
+              className="w-full text-left px-4 py-2.5 rounded-lg text-sm font-semibold flex items-center gap-2.5 text-red-400 hover:bg-red-950/10 hover:text-red-300"
+            >
+              <LogOut className="h-4 w-4" />
+              <span>Sair do RDS-PM</span>
+            </button>
           </div>
         )}
+      </header>
 
-        {activeTab === 'form' && (
-          <div className="space-y-6">
+      {/* 2. SUB-BANNER: STATE OF PERSISTENCE */}
+      <div className="bg-slate-950 border-b border-slate-850 py-2.5" id="connectivity-banner">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 text-xs">
+          
+          {/* Left status badge */}
+          <div className="flex items-center gap-2">
+            <Radio className={`h-3 w-3 animate-ping ${(!user || user.isDemo) ? 'text-amber-500' : 'text-emerald-500'}`} />
+            <span>Perfil: </span>
+            <span className="font-bold text-slate-200">{user?.role || 'Policial Militar'}</span>
+            <span className="text-slate-500">•</span>
+            {(!user || user.isDemo) ? (
+              <span className="text-amber-400 font-mono flex items-center gap-1">
+                <Lock className="h-3 w-3" />
+                BANCO LOCAL TEMPORÁRIO (DEMO)
+              </span>
+            ) : (
+              <span className="text-emerald-400 font-mono flex items-center gap-1">
+                <Globe className="h-3 w-3" />
+                SUPABASE CLOUD OPERANTE
+              </span>
+            )}
+          </div>
+
+          {/* Right quick database switch link or action info */}
+          <div className="text-slate-400 flex items-center gap-2 font-mono">
+            {syncing ? (
+              <span className="flex items-center gap-1 text-[11px] text-blue-400">
+                <span className="w-3 h-3 border border-blue-400 border-t-transparent rounded-full animate-spin" />
+                Sincronizando...
+              </span>
+            ) : (
+              <button 
+                type="button" 
+                onClick={() => user && loadReports(user)} 
+                className="text-slate-4 w-auto hover:text-white underline text-[11px] font-semibold flex items-center gap-1 cursor-pointer"
+              >
+                Sincronizar Arquivos ({reports?.length || 0})
+              </button>
+            )}
+          </div>
+
+        </div>
+      </div>
+
+      {/* 3. CORE SUBTAB CONTAINER */}
+      <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8" id="workspace-main-panel">
+        
+        {/* Render Form Tab */}
+        {currentTab === 'form' && (
+          <div className="max-w-4xl mx-auto animate-fadeIn">
             <ReportForm 
-              onSubmit={handleCreateReport} 
-              currentUserSession={session} 
+              onSubmit={handleSaveReport} 
+              currentUserSession={user} 
             />
           </div>
         )}
 
-        {activeTab === 'database' && (
-          <div className="space-y-6">
-            <SqlSchemaView />
+        {/* Render Reports Query Dashboard Tab */}
+        {currentTab === 'list' && (
+          <div className="animate-fadeIn">
+            <div className="mb-6 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+              <div>
+                <h2 className="text-xl font-bold tracking-tight text-white font-sans flex items-center gap-2">
+                  <FileCheck2 className="h-5.5 w-5.5 text-blue-450" />
+                  <span>Livro de Registro de Serviço</span>
+                </h2>
+                <p className="text-xs text-slate-400">Pesquisa, filtragem e compilação de dados táticos das operações</p>
+              </div>
+
+              {/* Shortcut buttons */}
+              <button
+                type="button"
+                onClick={() => setCurrentTab('form')}
+                className="bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold px-4 py-2 rounded-lg flex items-center gap-1.5 transition shadow-md shadow-amber-950/20 cursor-pointer"
+              >
+                <FilePlus className="h-4 w-4 text-slate-950" />
+                <span>Lançar Relatório</span>
+              </button>
+            </div>
+
+            <ReportList 
+              reports={reports || []} 
+              onDelete={handleDeleteReport} 
+              currentUserEmail={user?.email || ''}
+              onNavigateToForm={() => setCurrentTab('form')}
+            />
           </div>
         )}
 
-        {activeTab === 'viaturas_admin' && (
-          <div className="space-y-6">
-            <ViaturaManager />
+        {/* Render Database Configuration / SQL guide Tab */}
+        {currentTab === 'database' && (
+          <div className="max-w-4xl mx-auto animate-fadeIn">
+            <SqlSchemaView />
           </div>
         )}
 
       </main>
 
-      {/* FOOTER SYSTEM MARK */}
-      <footer className="bg-slate-950 py-5 text-center border-t border-blue-950 text-slate-500 text-[10px] font-mono select-none">
-        <p>© 2026 POLÍCIA MILITAR DE MATO GROSSO • SECRETARIA DE OPERAÇÕES OPERACIONAIS</p>
-        <p className="mt-1 text-[#1e293b]">INTEGRAÇÃO POSTGRESQL DIRECT CONNECTION • ALL RIGHTS SECURRED</p>
+      {/* 4. COGNITIVE COMPACT SPACING FOOTER */}
+      <footer className="bg-slate-900 border-t border-slate-850/80 py-6" id="app-footer">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center text-xs text-slate-500 space-y-2">
+          <p className="font-semibold text-slate-400">RDS-PM • Sistema de Lançamento e Controle Diário de Policiamento Militar</p>
+          <p className="font-mono text-[10px] text-slate-600">Polícia Militar de Mato Grosso (PMMT) - Todos os direitos reservados • 2026</p>
+        </div>
       </footer>
-
     </div>
   );
 }
