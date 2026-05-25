@@ -3,6 +3,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+export interface AbastecimentoItem {
+  id?: string;
+  viatura_id?: string;
+  relatorio_id?: string;
+  valor: number; // Brazilian Real R$
+  saldo_litros: number;
+  km_abastecimento?: number;
+}
+
 export interface Viatura {
   id?: string;
   prefixo: string; // Ex: VTR-1049
@@ -10,6 +19,30 @@ export interface Viatura {
   placa?: string;
   km_inicial?: number;
   km_final?: number;
+  km_inicial_auto?: number; // Auto-filled from previous report
+  abastecimento?: AbastecimentoItem;
+}
+
+export interface CatalogoViatura {
+  id?: string;
+  prefixo: string;
+  modelo: string;
+  placa?: string;
+  ativo: boolean;
+}
+
+export interface ProdutividadeAutomatica {
+  id?: string;
+  relatorio_id?: string;
+  ocorrencia_id?: string;
+  tipo_registro: 'BO' | 'TCO' | 'APREENSAO';
+  armas_count?: number;
+  municoes_count?: number;
+  drogas_peso?: number;
+  valores_total?: number;
+  veiculos_count?: number;
+  notificacoes_count?: number;
+  pessoas_conduzidas?: number;
 }
 
 export interface OcorrenciaItem {
@@ -28,13 +61,28 @@ export interface AnexoItem {
   tipo: 'imagem' | 'pdf' | 'outro';
 }
 
+export interface PatrulheiroItem {
+  id?: string;
+  guarnicao_id?: string;
+  policial_matricula: string;
+  policial_nome?: string;
+  policial_graduacao?: string;
+  ordem?: number;
+}
+
 export interface GuarnicaoItem {
   id?: string;
   nome_guarnicao: string;
   tipo_guarnicao: 'Rádio Patrulha' | 'Força Tática' | 'Patrulhamento Rural' | 'CPU' | 'Maria da Penha' | 'Outro';
   viatura: string;
-  policiais_integrantes: string;
+  viatura_prefixo?: string;
+  viatura_modelo?: string;
+  comandante_matricula?: string;
   comandante_guarnicao: string;
+  motorista_matricula?: string;
+  motorista_nome?: string;
+  patrulheiros?: PatrulheiroItem[];
+  policiais_integrantes?: string; // Deprecated - kept for backward compatibility
   horario_inicial: string;
   horario_final: string;
 }
@@ -97,6 +145,7 @@ export interface PoliceReport {
   lista_guarnicoes?: GuarnicaoItem[];
   lista_atividades_delegadas?: AtividadeDelegadaItem[];
   lista_jornadas_extraordinarias?: JornadaExtraordinariaItem[];
+  lista_produtividade_automatica?: ProdutividadeAutomatica[];
 }
 
 export interface UserSession {
