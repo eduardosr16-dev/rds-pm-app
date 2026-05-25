@@ -52,7 +52,7 @@ export default function App() {
           
           const validatedSession: UserSession = {
             id: parsed.id || 'temp-id',
-            email: parsed.email || `${parsed.matricula || 'militar'}@pm.mt.gov.br`,
+            email: parsed.email || '',
             name: parsed.name || 'USUÁRIO',
             role: parsed.role || 'POLICIAL MILITAR',
             matricula: parsed.matricula || '000.000',
@@ -104,7 +104,7 @@ export default function App() {
     }
     const validatedSession: UserSession = {
       id: session.id || 'temp-id',
-      email: session.email || `${session.matricula || 'militar'}@pm.mt.gov.br`,
+      email: session.email || '',
       name: session.name || 'USUÁRIO',
       role: session.role || 'POLICIAL MILITAR',
       matricula: session.matricula || '000.000',
@@ -450,7 +450,7 @@ export default function App() {
             <ReportList 
               reports={reports || []} 
               onDelete={handleDeleteReport} 
-              currentUserEmail={user?.email || 'militar@pm.mt.gov.br'}
+              currentUserEmail={user?.email || ''}
               onNavigateToForm={() => setCurrentTab('form')}
             />
           </div>

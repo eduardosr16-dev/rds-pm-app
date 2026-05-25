@@ -619,7 +619,7 @@ export default function ReportForm({ onSubmit, currentUserSession }: ReportFormP
     setSubmitting(true);
 
     const reportPayload: Omit<PoliceReport, 'id' | 'created_at'> = {
-      user_email: (currentUserSession && currentUserSession.email) || 'militar@pm.mt.gov.br',
+      user_email: (currentUserSession && currentUserSession.email) || '',
       operacao: operacao.trim(),
       turno,
       horario_servico: horarioServico,

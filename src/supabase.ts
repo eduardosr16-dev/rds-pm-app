@@ -284,6 +284,24 @@ CREATE POLICY "Acesso livre select usuarios_pm" ON public.usuarios_pm FOR SELECT
 CREATE POLICY "Acesso livre insert usuarios_pm" ON public.usuarios_pm FOR INSERT WITH CHECK (true);
 CREATE POLICY "Acesso livre update usuarios_pm" ON public.usuarios_pm FOR UPDATE USING (true);
 CREATE POLICY "Acesso livre delete usuarios_pm" ON public.usuarios_pm FOR DELETE USING (true);
+
+-- 11. TABELA DE USUARIOS (SISTEMA DE PRIMEIRO ACESSO)
+CREATE TABLE IF NOT EXISTS public.usuarios (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  rg_pm VARCHAR(50) UNIQUE NOT NULL,
+  email VARCHAR(255) UNIQUE,
+  nome VARCHAR(255) NOT NULL,
+  posto VARCHAR(50) NOT NULL,
+  ativo BOOLEAN NOT NULL DEFAULT true,
+  primeiro_acesso BOOLEAN NOT NULL DEFAULT true,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+ALTER TABLE public.usuarios ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Acesso livre select usuarios" ON public.usuarios FOR SELECT USING (true);
+CREATE POLICY "Acesso livre insert usuarios" ON public.usuarios FOR INSERT WITH CHECK (true);
+CREATE POLICY "Acesso livre update usuarios" ON public.usuarios FOR UPDATE USING (true);
+CREATE POLICY "Acesso livre delete usuarios" ON public.usuarios FOR DELETE USING (true);
 `;
 
 // Real relational fetching from Supabase database

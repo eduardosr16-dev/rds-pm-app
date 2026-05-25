@@ -70,8 +70,8 @@ export default function ReportList({ reports, onDelete, currentUserEmail, onNavi
   // Compute distinct commanders/officers on the current dataset for dropdown selection
   const commandersList = useMemo(() => {
     const set = new Set<string>();
-    reports.forEach(r => {
-      if (r.comandante_responsavel) set.add(r.comandante_responsavel.trim());
+    (reports || []).forEach(r => {
+      if (r && r.comandante_responsavel) set.add(r.comandante_responsavel.trim());
     });
     return Array.from(set).sort();
   }, [reports]);
@@ -82,9 +82,14 @@ export default function ReportList({ reports, onDelete, currentUserEmail, onNavi
     const keys = new Set<string>();
     
     // Sort reports chronologically to order months
-    const sortedReports = [...reports].sort((a, b) => b.created_at.localeCompare(a.created_at));
+    const sortedReports = [...(reports || [])].sort((a, b) => {
+      const b_created = b?.created_at || '';
+      const a_created = a?.created_at || '';
+      return b_created.localeCompare(a_created);
+    });
     
     sortedReports.forEach(r => {
+      if (!r || !r.created_at) return;
       try {
         const d = new Date(r.created_at);
         if (!isNaN(d.getTime())) {
@@ -1249,7 +1254,7 @@ export default function ReportList({ reports, onDelete, currentUserEmail, onNavi
                 <h3 className="text-xs font-black font-mono tracking-wider uppercase text-slate-950 border-b-2 border-slate-350 pb-1 mb-2.5">
                   1.2. GUARNIÇÕES DE SERVIÇO (EFETIVO OPERACIONAL PMMT)
                 </h3>
-                {(!selectedReport.lista_guarnicoes || selectedReport.lista_guarnicoes.length === 0) ? (
+                {(!selectedReport.lista_guarnicoes || !Array.isArray(selectedReport.lista_guarnicoes) || selectedReport.lista_guarnicoes.length === 0) ? (
                   <p className="text-xs text-slate-600 italic font-mono border border-slate-200 p-2.5 bg-slate-50/20">
                     Nenhuma guarnição operacional registrada individualmente neste relatório.
                   </p>
@@ -1266,7 +1271,7 @@ export default function ReportList({ reports, onDelete, currentUserEmail, onNavi
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-250 font-sans text-slate-900">
-                        {selectedReport.lista_guarnicoes.map((g, i) => (
+                        {(selectedReport.lista_guarnicoes || []).map((g, i) => (
                           <tr key={i} className="hover:bg-slate-50">
                             <td className="p-2 font-bold">{g.nome_guarnicao}</td>
                             <td className="p-2">
@@ -1290,7 +1295,7 @@ export default function ReportList({ reports, onDelete, currentUserEmail, onNavi
                 <h3 className="text-xs font-black font-mono tracking-wider uppercase text-slate-950 border-b-2 border-slate-350 pb-1 mb-2.5">
                   1.3. EQUIPES DE ATIVIDADE DELEGADA (CONVÊNIOS MUNICIPAIS SESP)
                 </h3>
-                {(!selectedReport.lista_atividades_delegadas || selectedReport.lista_atividades_delegadas.length === 0) ? (
+                {(!selectedReport.lista_atividades_delegadas || !Array.isArray(selectedReport.lista_atividades_delegadas) || selectedReport.lista_atividades_delegadas.length === 0) ? (
                   <p className="text-xs text-slate-600 italic font-mono border border-slate-200 p-2.5 bg-slate-50/20">
                     Nenhuma equipe de atividade delegada lançada para o turno.
                   </p>
@@ -1307,7 +1312,7 @@ export default function ReportList({ reports, onDelete, currentUserEmail, onNavi
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-250 font-sans text-slate-900">
-                        {selectedReport.lista_atividades_delegadas.map((ad, i) => (
+                        {(selectedReport.lista_atividades_delegadas || []).map((ad, i) => (
                           <tr key={i} className="hover:bg-slate-50">
                             <td className="p-2 font-bold">{ad.nome_equipe}</td>
                             <td className="p-2 font-mono text-slate-800">{ad.viatura}</td>
@@ -1327,7 +1332,7 @@ export default function ReportList({ reports, onDelete, currentUserEmail, onNavi
                 <h3 className="text-xs font-black font-mono tracking-wider uppercase text-slate-950 border-b-2 border-slate-350 pb-1 mb-2.5">
                   1.4. JORNADA EXTRAORDINÁRIA (REFORÇO DE POLICIAMENTO MILITAR)
                 </h3>
-                {(!selectedReport.lista_jornadas_extraordinarias || selectedReport.lista_jornadas_extraordinarias.length === 0) ? (
+                {(!selectedReport.lista_jornadas_extraordinarias || !Array.isArray(selectedReport.lista_jornadas_extraordinarias) || selectedReport.lista_jornadas_extraordinarias.length === 0) ? (
                   <p className="text-xs text-slate-600 italic font-mono border border-slate-200 p-2.5 bg-slate-50/20">
                     Nenhum lançamento de jornada extraordinária neste turno.
                   </p>
@@ -1344,7 +1349,7 @@ export default function ReportList({ reports, onDelete, currentUserEmail, onNavi
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-250 font-sans text-slate-900">
-                        {selectedReport.lista_jornadas_extraordinarias.map((je, i) => (
+                        {(selectedReport.lista_jornadas_extraordinarias || []).map((je, i) => (
                           <tr key={i} className="hover:bg-slate-50">
                             <td className="p-2 font-bold">{je.nome_equipe}</td>
                             <td className="p-2 font-mono text-slate-800">{je.viatura}</td>
@@ -1369,7 +1374,7 @@ export default function ReportList({ reports, onDelete, currentUserEmail, onNavi
                   5. VIATURAS EMPENHADAS E CONTROLE DE QUILOMETRAGEM
                 </h3>
                 
-                {(!selectedReport.lista_viaturas || selectedReport.lista_viaturas.length === 0) ? (
+                {(!selectedReport.lista_viaturas || !Array.isArray(selectedReport.lista_viaturas) || selectedReport.lista_viaturas.length === 0) ? (
                   <p className="text-xs text-slate-600 italic font-mono border border-slate-200 p-2.5">
                     Nenhuma viatura individual estruturada foi vinculada neste documento. Totalizador do cabeçalho indica {selectedReport.viaturas} VTR(s) em serviço.
                   </p>
@@ -1387,7 +1392,7 @@ export default function ReportList({ reports, onDelete, currentUserEmail, onNavi
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-250 font-mono text-slate-900">
-                        {selectedReport.lista_viaturas.map((vtr, i) => {
+                        {(selectedReport.lista_viaturas || []).map((vtr, i) => {
                           const kmDiff = (vtr.km_final && vtr.km_inicial) ? (vtr.km_final - vtr.km_inicial) : null;
                           return (
                             <tr key={i} className="hover:bg-slate-50">
@@ -1414,13 +1419,13 @@ export default function ReportList({ reports, onDelete, currentUserEmail, onNavi
                   6. OCORRÊNCIAS ATENDIDAS E SUSPEITOS CONDUZIDOS
                 </h3>
 
-                {(!selectedReport.lista_ocorrencias || selectedReport.lista_ocorrencias.length === 0) ? (
+                {(!selectedReport.lista_ocorrencias || !Array.isArray(selectedReport.lista_ocorrencias) || selectedReport.lista_ocorrencias.length === 0) ? (
                   <p className="text-xs text-slate-605 italic font-mono border border-slate-200 p-2.5 bg-slate-50/20">
                     Nenhuma ocorrência tabulada individualmente. Verifique o relato consolidado na seção 05.
                   </p>
                 ) : (
                   <div className="space-y-2">
-                    {selectedReport.lista_ocorrencias.map((oco, idx) => (
+                    {(selectedReport.lista_ocorrencias || []).map((oco, idx) => (
                       <div key={idx} className="border border-slate-300 p-3 bg-slate-50/50 text-xs font-sans rounded">
                         <div className="flex justify-between items-start flex-wrap gap-2 border-b border-slate-200 pb-1.5 mb-1.5">
                           <div>
@@ -1510,11 +1515,11 @@ export default function ReportList({ reports, onDelete, currentUserEmail, onNavi
                 <h3 className="text-xs font-black font-mono tracking-wider uppercase text-slate-950 border-b-2 border-slate-350 pb-1 mb-2.5">
                   9. ANEXOS OPERACIONAIS E LAUDOS REGISTRADOS
                 </h3>
-                {(!selectedReport.lista_anexos || selectedReport.lista_anexos.length === 0) ? (
+                {(!selectedReport.lista_anexos || !Array.isArray(selectedReport.lista_anexos) || selectedReport.lista_anexos.length === 0) ? (
                   <p className="text-xs text-slate-550 italic font-mono border border-slate-200 p-2">Sem anexos de termos cadastrados eletronicamente.</p>
                 ) : (
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs font-mono">
-                    {selectedReport.lista_anexos.map((an, i) => (
+                    {(selectedReport.lista_anexos || []).map((an, i) => (
                       <div key={i} className="border border-slate-300 p-2 bg-slate-55 rounded flex items-center gap-2">
                         <Paperclip className="h-3.5 w-3.5 text-blue-800 shrink-0" />
                         <div className="min-w-0 flex-1">
