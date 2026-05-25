@@ -338,38 +338,87 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
 
     if (isConfigured && supabase) {
       try {
-        console.log(`[RDS-PM] Enviando Primeiro Acesso para a API segura do servidor...`);
-        
-        const response = await fetch('/api/primeiro-acesso', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            rg_pm: cleanRg,
-            password: regPassword
-          })
-        });
+        console.log(`[RDS-PM] Iniciando Primeiro Acesso para RG: ${cleanRg}`);
 
-        const resData = await response.json();
-        if (!response.ok || !resData.success) {
-          throw new Error(resData.message || 'Falha ao concluir o Primeiro Acesso na API.');
+        // 1. Check if user exists in usuarios table and has primeiro_acesso = true
+        const { data: dbUser, error: dbError } = await supabase
+          .from('usuarios')
+          .select('*')
+          .eq('rg_pm', cleanRg)
+          .maybeSingle();
+
+        if (dbError && dbError.code !== 'PGRST116') {
+          console.error('[RDS-PM] Erro ao buscar usuario:', dbError);
+          throw new Error('Erro ao verificar cadastro: ' + dbError.message);
         }
 
-        console.log('[RDS-PM] Primeiro acesso registrado via servidor com sucesso.');
-        
+        if (!dbUser) {
+          throw new Error('RG PM não encontrado no cadastro de militares. Verifique se seu RG está correto.');
+        }
+
+        if (!dbUser.primeiro_acesso) {
+          throw new Error('Este RG PM já possui Primeiro Acesso concluído. Faça login normalmente.');
+        }
+
+        const email = dbUser.email || getProfessionalEmail(officialOfficer.nome_completo, cleanRg);
+        const nome = dbUser.nome || officialOfficer.nome_completo;
+        const posto = dbUser.posto || officialOfficer.graduacao;
+
+        console.log(`[RDS-PM] Criando conta Supabase Auth para: ${email}`);
+
+        // 2. Create Supabase Auth account using signUp
+        const { data: authData, error: authError } = await supabase.auth.signUp({
+          email: email,
+          password: regPassword,
+          options: {
+            data: {
+              rg_pm: cleanRg,
+              nome: nome,
+              posto: posto
+            }
+          }
+        });
+
+        if (authError) {
+          console.error('[RDS-PM] Erro no signUp:', authError);
+          if (authError.message.includes('already registered') || authError.message.includes('already exists')) {
+            // User already exists in auth, try to sign in to verify password
+            const { error: signInError } = await supabase.auth.signInWithPassword({
+              email: email,
+              password: regPassword
+            });
+            if (signInError) {
+              throw new Error('Este e-mail já está cadastrado. Se esqueceu sua senha, use a opção "Alterar Senha".');
+            }
+          } else {
+            throw new Error('Erro ao criar conta: ' + authError.message);
+          }
+        }
+
+        // 3. Update usuarios table to mark primeiro_acesso = false
+        const { error: updateError } = await supabase
+          .from('usuarios')
+          .update({ primeiro_acesso: false })
+          .eq('rg_pm', cleanRg);
+
+        if (updateError) {
+          console.warn('[RDS-PM] Aviso ao atualizar primeiro_acesso:', updateError.message);
+        }
+
+        console.log('[RDS-PM] Primeiro Acesso concluído com sucesso!');
+
         // Return to login with state set
         setRg(regRg);
         setPassword('');
-        setSuccessMsg(`Primeiro Acesso efetuado com sucesso para ${resData.posto} ${resData.nome}! Agora você pode entrar com seu RG PM e a senha cadastrada.`);
+        setSuccessMsg(`Primeiro Acesso efetuado com sucesso para ${posto} ${nome}! Agora você pode entrar com seu RG PM e a senha cadastrada.`);
         setRegRg('');
         setRegPassword('');
         setIdentifiedOfficer(null);
         setActiveTab('login');
 
       } catch (err: any) {
-        console.error('[RDS-PM] Erro no Primeiro Acesso via API:', err);
-        setErrorMsg(err?.message || 'Falha de comunicação com o servidor ao processar o Primeiro Acesso.');
+        console.error('[RDS-PM] Erro no Primeiro Acesso:', err);
+        setErrorMsg(err?.message || 'Falha ao processar o Primeiro Acesso.');
       } finally {
         setLoading(false);
       }

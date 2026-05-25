@@ -16,8 +16,10 @@ const PORT = 3000;
 
 app.use(express.json());
 
-const connectionString =
-  'postgresql://postgres:136694@db.svvxthekfgsjvwskipmc.supabase.co:5432/postgres';
+// Use the Supabase database URL from environment or the VITE_SUPABASE_URL
+const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || '';
+const supabaseProjectRef = supabaseUrl.replace('https://', '').replace('.supabase.co', '');
+const dbUrl = process.env.DATABASE_URL || `postgresql://postgres:${process.env.SUPABASE_DB_PASSWORD || 'postgres'}@db.${supabaseProjectRef}.supabase.co:5432/postgres`;
 
 app.get('/api/db-bootstrap-status', async (req, res) => {
   try {
@@ -62,6 +64,14 @@ app.post('/api/primeiro-acesso', async (req, res) => {
 
   const cleanRg = rg_pm.replace(/\D/g, '');
 
+  // Check if the database URL is configured
+  if (!dbUrl || dbUrl.includes('undefined')) {
+    return res.status(500).json({
+      success: false,
+      message: 'Database connection not configured. Please set DATABASE_URL or Supabase environment variables.',
+    });
+  }
+
   const client = new pg.Client({
     connectionString: dbUrl,
     ssl: { rejectUnauthorized: false },
@@ -69,6 +79,23 @@ app.post('/api/primeiro-acesso', async (req, res) => {
 
   try {
     await client.connect();
+
+    // Check if usuarios table exists
+    const tableCheck = await client.query(`
+      SELECT EXISTS (
+        SELECT FROM information_schema.tables
+        WHERE table_schema = 'public'
+        AND table_name = 'usuarios'
+      );
+    `);
+
+    if (!tableCheck.rows[0].exists) {
+      await client.end();
+      return res.status(500).json({
+        success: false,
+        message: 'Tabela usuarios não existe no banco de dados. Execute as migrations primeiro.',
+      });
+    }
 
     const usuario = await client.query(
       `
@@ -84,7 +111,7 @@ app.post('/api/primeiro-acesso', async (req, res) => {
 
       return res.status(404).json({
         success: false,
-        message: 'RG PM não encontrado.',
+        message: 'RG PM não encontrado na tabela usuarios. Verifique se o militar está cadastrado.',
       });
     }
 
@@ -202,6 +229,8 @@ app.post('/api/primeiro-acesso', async (req, res) => {
     return res.json({
       success: true,
       email,
+      posto: dados.posto || dados.graduacao,
+      nome: dados.nome,
     });
   } catch (err: any) {
     console.error(err);
